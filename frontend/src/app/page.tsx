@@ -5,6 +5,7 @@ import { getHealth, type Health, type Profile } from "@/lib/api";
 import { CloneTab } from "@/components/CloneTab";
 import { DesignTab } from "@/components/DesignTab";
 import { LibraryTab } from "@/components/LibraryTab";
+import { SettingsModal } from "@/components/SettingsModal";
 import { VoiceSphere } from "@/components/VoiceSphere";
 
 type TabKey = "clone" | "design" | "library";
@@ -13,6 +14,7 @@ export default function VoiceStudioPage() {
   const [tab, setTab] = useState<TabKey>("clone");
   const [health, setHealth] = useState<Health | null>(null);
   const [libraryKey, setLibraryKey] = useState(0);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const refreshHealth = useCallback(() => {
     getHealth().then(setHealth).catch(() => setHealth(null));
@@ -43,7 +45,30 @@ export default function VoiceStudioPage() {
               </div>
             </div>
           </div>
-          <HealthPill health={health} />
+          <div className="flex items-center gap-2">
+            <HealthPill health={health} />
+            <button
+              className="btn btn-ghost"
+              onClick={() => setSettingsOpen(true)}
+              title="Reader connection settings"
+              aria-label="Settings"
+            >
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+            </button>
+          </div>
         </div>
         <div className="max-w-[1100px] mx-auto px-6 pb-3 flex gap-1">
           <TabBtn active={tab === "clone"} onClick={() => setTab("clone")} label="Clone a voice" />
@@ -57,6 +82,14 @@ export default function VoiceStudioPage() {
         {tab === "design" && <DesignTab onCreated={onCreated} />}
         {tab === "library" && <LibraryTab refreshKey={libraryKey} />}
       </main>
+
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onSaved={refreshHealth}
+        initialBaseUrl={health?.reader_base_url ?? null}
+        tokenAlreadySet={!!health?.reader_token_set}
+      />
     </div>
   );
 }

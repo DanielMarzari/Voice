@@ -146,15 +146,16 @@ void main() {
     return;
   }
 
-  // Flow speed — idle only. Speaking does NOT speed up the base flow;
-  // instead it overlays a traveling ring (see below). This matches how
-  // ElevenLabs' shader separates the always-on "uTime * timeScale" motion
-  // from the audio-reactive splat.
-  float t = uTime * 1.35 + uSeed;
+  // Flow speed: idle roils at 1.35x; speaking bumps it to 1.75x for more
+  // visible agitation WITHOUT any ring overlay or UV displacement.
+  // ElevenLabs' actual implementation runs a full fluid-sim on a secondary
+  // framebuffer — we approximate the agitated look by just stirring the
+  // FBM inputs harder. Subtle but readable.
+  float t = uTime * (1.35 + 0.40 * uSpeaking) + uSeed;
 
-  // Displacement amplitude for the domain-warping — constant. Speaking
-  // used to ramp this up, which read as "zoom/pulse" distortion. Gone now.
-  float amp = 0.55;
+  // Displacement amplitude also creeps up a bit during speaking so the
+  // texture visibly churns more. Kept small enough not to "zoom."
+  float amp = mix(0.55, 0.80, uSpeaking);
 
   // Domain warping with ORBITAL offsets. Noise origin swirls around rather
   // than translating in one direction — prevents the "scrolling up" look.
@@ -172,6 +173,13 @@ void main() {
     fbm(uv * 1.3 + q * 1.8 + offD)
   );
   float n = fbm(uv * 1.3 + s * amp);
+
+  // Secondary high-frequency perturbation during speaking — adds a
+  // "stirred" feel to the color without the wrong ring effect.
+  if (uSpeaking > 0.02) {
+    float extra = fbm(uv * 4.0 + vec2(uTime * 0.9, uTime * 0.7));
+    n = mix(n, extra, 0.22 * uSpeaking);
+  }
 
   // Four-way color mix. q.x, s.y, n each drive a different blend, so the
   // result is never just linear between two colors — you get the mottled,
@@ -196,24 +204,9 @@ void main() {
   float grain = (hash(vUv * 920.0 + t * 0.1) - 0.5) * 0.035;
   color += grain;
 
-  // ------- Speaking state: additive traveling ring (ElevenLabs splat) -------
-  // Ported almost directly from their splat fragment shader:
-  //   pTime = time * .25 + cumulativeAudio * .15
-  //   pDist = mod(dist * 2 - pTime, 1)
-  //   pulse = smoothstep(0, width, pDist) - smoothstep(width, width*2, pDist)
-  //   splat = pulse * intensity * distClamp * color
-  // No UV displacement, no scaling, no speed-up — just color ADDITION.
-  if (uSpeaking > 0.02) {
-    float pTime = uTime * 0.45;
-    float pDist = mod(r * 2.0 - pTime, 1.0);
-    float width = 0.20;
-    float pulse = smoothstep(0.0, width, pDist) - smoothstep(width, width * 2.0, pDist);
-    // Fade toward the rim so the ring doesn't smear past the edge mask.
-    pulse *= clamp(1.2 - r * 1.1, 0.0, 1.0);
-    // Bright neutral ring with a slight warm tint pulled from the palette.
-    vec3 ringColor = mix(vec3(1.0), uColor2, 0.35);
-    color += ringColor * pulse * uSpeaking * 0.55;
-  }
+  // (No traveling ring here — user feedback: EL does fluid injection into
+  // a separate sim texture, not additive concentric rings. The speaking
+  // signal lives entirely in the agitated flow above.)
 
   // Circular alpha with 1px smooth edge.
   float aa = fwidth(r) * 0.9;

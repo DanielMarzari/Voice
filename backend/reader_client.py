@@ -8,6 +8,15 @@ The Reader endpoint is `POST /api/voices` which accepts multipart:
 
 The token is generated from Reader → Voice Lab → "Generate Studio Token".
 Stored hashed server-side, shown once at creation.
+
+Configuration sources, highest priority first:
+  1. Runtime overrides set by set_config() — typed in the Settings gear
+     in Voice Studio's header.
+  2. Environment variables READER_BASE_URL / READER_AUTH_TOKEN (from
+     .env.local loaded at startup).
+
+This means the user can paste credentials in the UI without editing
+files or restarting the backend.
 """
 
 from __future__ import annotations
@@ -34,13 +43,29 @@ class ReaderUploadError(RuntimeError):
     """Raised on non-2xx response from the Reader server."""
 
 
+# Runtime overrides set via POST /api/config. When None, we fall back to env.
+_override_base: Optional[str] = None
+_override_token: Optional[str] = None
+
+
+def set_config(base_url: Optional[str], auth_token: Optional[str]) -> None:
+    """Update the in-memory config. Pass None for either to clear its
+    override (re-reads the env value for that field). Does NOT persist
+    to disk — a backend restart reverts to env-only config, which is the
+    desired behavior so secrets stay out of committed files."""
+    global _override_base, _override_token
+    _override_base = base_url.rstrip("/") if base_url else None
+    _override_token = auth_token if auth_token else None
+
+
 def _config() -> tuple[str, str]:
-    base = os.environ.get("READER_BASE_URL", "").rstrip("/")
-    token = os.environ.get("READER_AUTH_TOKEN", "")
+    base = (_override_base
+            or os.environ.get("READER_BASE_URL", "")).rstrip("/")
+    token = _override_token or os.environ.get("READER_AUTH_TOKEN", "")
     if not base or not token:
         raise ReaderConfigError(
-            "READER_BASE_URL and READER_AUTH_TOKEN must be set in .env.local. "
-            "Generate a token from the Reader → Voice Lab UI."
+            "Reader not configured. Click the settings gear in the Voice "
+            "Studio header and paste your Reader URL + token."
         )
     return base, token
 
@@ -51,6 +76,17 @@ def is_configured() -> bool:
         return True
     except ReaderConfigError:
         return False
+
+
+def current_base_url() -> Optional[str]:
+    """For displaying in the Settings UI — may differ from env if user
+    overrode it at runtime."""
+    return _override_base or os.environ.get("READER_BASE_URL") or None
+
+
+def token_is_set() -> bool:
+    """Returns True if a token is configured, without exposing it."""
+    return bool(_override_token or os.environ.get("READER_AUTH_TOKEN"))
 
 
 def upload_profile(profile: VoiceProfile) -> dict:

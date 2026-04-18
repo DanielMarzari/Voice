@@ -118,6 +118,11 @@ export function DesignTab({ onCreated }: Props) {
     }
   };
 
+  // Slider-driven palette: pitch → red, speed → yellow, temperature →
+  // green, with a cool blue-violet anchor for guaranteed contrast.
+  // Declared up here so both the sphere prop and onSave() dep list see it.
+  const livePalette = useMemo(() => designPalette(sliders), [sliders]);
+
   const onPreview = useCallback(async () => {
     if (!baseVoice || !engine || busy) return;
     setBusy("preview");
@@ -160,6 +165,8 @@ export function DesignTab({ onCreated }: Props) {
         speed: sliders.speed,
         temperature: sliders.temperature,
         speakerName: engine === "xtts" ? speakerName : null,
+        // Ship the exact slider-derived palette so Reader's sphere matches.
+        colors: livePalette as unknown as string[],
         previewText: previewText.trim() || undefined,
       });
       setResult(p);
@@ -169,17 +176,11 @@ export function DesignTab({ onCreated }: Props) {
     } finally {
       setBusy(null);
     }
-  }, [name, baseVoice, engine, language, sliders, previewText, speakerName, busy, onCreated]);
+  }, [name, baseVoice, engine, language, sliders, previewText, speakerName, livePalette, busy, onCreated]);
 
   // Seed for preview sphere — static so the sphere identity doesn't jump
-  // every time a slider moves. The colors (below) are what change.
+  // every time a slider moves. The colors (livePalette above) are what change.
   const previewSeed = `${engine}:${baseVoice}:${speakerName ?? ""}`;
-  // Slider-driven palette: pitch → color0, temperature → color1,
-  // speed → color2, cool accent computed for always-present contrast.
-  const livePalette = useMemo(
-    () => designPalette(sliders),
-    [sliders]
-  );
 
   return (
     <div className="grid md:grid-cols-[1fr_320px] gap-8 items-start">

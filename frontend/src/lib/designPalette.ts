@@ -1,19 +1,21 @@
 /**
  * designPalette — derive a 4-color sphere palette from the Design tab's
- * live slider values, per user spec:
- *   (a) pitch influences one color,
- *       temperature another,
- *       speed another,
- *   (b) higher setting → brighter color, lower → darker,
- *   (c) there should always be contrast.
+ * live slider values.
+ *
+ * Each slider owns a distinct hue family so the resulting palette actually
+ * covers the color wheel — red / yellow / green / blue-violet — instead of
+ * sitting in the coral-pink-peach corner. Rule (c) "always contrast" is
+ * satisfied by the fixed hue assignment: no matter where the sliders sit,
+ * you get one warm red, one yellow/gold, one green/teal, and one cool
+ * blue-violet. Slider value only controls brightness within each hue.
  *
  * Mapping:
- *   color0 (warm primary)   ← pitch       (coral gradient)
- *   color1 (warm secondary) ← temperature (peach/amber gradient)
- *   color2 (highlight)      ← speed       (cream gradient)
- *   color3 (cool accent)    ← fixed contrast color, tinted inversely
- *                             to the warm average so the palette always
- *                             has a cool anchor (→ rule (c)).
+ *   color0 (red family)        ← pitch        (deep crimson → bright coral-red)
+ *   color1 (yellow family)     ← speed        (dark amber   → bright butter)
+ *   color2 (green family)      ← temperature  (forest teal  → bright mint)
+ *   color3 (blue-violet family) ← fixed contrast anchor (indigo → sky-violet),
+ *                                parameterized by warm-average so the cool
+ *                                stays visible whatever the warms are doing.
  */
 
 type Palette = [string, string, string, string];
@@ -37,7 +39,6 @@ function mixHex(c1: string, c2: string, t: number): string {
   return `#${h(r)}${h(g)}${h(b)}`;
 }
 
-/** Normalize a value from [min, max] to [0, 1]. */
 function norm(v: number, min: number, max: number): number {
   return Math.max(0, Math.min(1, (v - min) / (max - min)));
 }
@@ -51,22 +52,17 @@ export function designPalette(args: {
   const sN = norm(args.speed, 0.5, 2.0);
   const tN = norm(args.temperature, 0.1, 1.5);
 
-  // color0: pitch → coral. Low = burgundy-ish, high = bright peach-coral.
-  const color0 = mixHex("#7a2e28", "#ff9478", pN);
-
-  // color1: temperature → pink/rose. Low = dusty mauve, high = vivid rose.
-  const color1 = mixHex("#6b3a42", "#ff6b8a", tN);
-
-  // color2: speed → warm highlight. Low = muted cream, high = bright butter.
-  const color2 = mixHex("#a08870", "#ffefc2", sN);
-
-  // color3: cool accent for contrast. Pulls in the opposite direction of
-  // the warm average so the palette always has visible range. The base
-  // picks from a narrow cool band (indigo → sky) parameterized by the
-  // warm average — the less warm/bright the rest, the cooler/deeper the
-  // accent, so contrast is preserved across all slider positions.
-  const warmAvg = (pN + tN + sN) / 3;
-  const color3 = mixHex("#3a3270", "#b8c8ff", 1 - Math.abs(warmAvg - 0.5) * 1.6);
+  // Red family (pitch): crimson → bright coral-red.
+  const color0 = mixHex("#5a1820", "#ff6a5a", pN);
+  // Yellow family (speed): dark amber → bright butter.
+  const color1 = mixHex("#5a3d10", "#ffd860", sN);
+  // Green family (temperature): dark forest → bright mint.
+  const color2 = mixHex("#0f3a2a", "#80f2b8", tN);
+  // Cool anchor (blue-violet) — brightness inversely ties to warm average
+  // so when warms are bright the cool becomes deeper (contrast), and vice
+  // versa. Never goes fully black — hue is always visible.
+  const warmAvg = (pN + sN + tN) / 3;
+  const color3 = mixHex("#1d1e4a", "#8ea6ff", 1 - Math.abs(warmAvg - 0.5) * 1.4);
 
   return [color0, color1, color2, color3];
 }
