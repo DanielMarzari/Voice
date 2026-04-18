@@ -34,6 +34,9 @@ type Props = {
   seed: string;
   size?: number;
   speaking?: boolean;
+  /** When true (e.g. right after a preview finishes generating), adds a
+   *  pulsing warm glow around the sphere to signal "click to listen". */
+  ready?: boolean;
   withPlayIcon?: boolean;
   className?: string;
   onClick?: () => void;
@@ -139,25 +142,43 @@ void main() {
     return;
   }
 
-  // Flow speed: idle is already noticeably alive (ElevenLabs' ambient
-  // orbs visibly roil at rest). Speaking roughly doubles the pace.
-  float t = uTime * (0.45 + 0.55 * uSpeaking) + uSeed;
+  // Flow speed: 3x idle so the ambient orb visibly roils. Speaking roughly
+  // doubles the pace on top of that.
+  float t = uTime * (1.35 + 0.90 * uSpeaking) + uSeed;
 
   // Displacement amplitude: idle is healthy motion; speaking pushes harder
   // so the shape visibly deforms — that's the "disruption."
   float amp = mix(0.50, 0.95, uSpeaking);
 
-  // Domain warping: two passes of FBM where each pass's output perturbs
-  // the next pass's input. Produces the fluid/smoke look.
+  // Circular disruption during speaking: a traveling radial wave added to
+  // UV before the flow field lookup. This is how the ElevenLabs shader
+  // visualizes audio — the colors ripple outward from the center instead
+  // of drifting past like a scrolling picture.
+  vec2 warpUv = uv;
+  if (uSpeaking > 0.02) {
+    vec2 radial = uv / max(r, 0.0001);
+    float wave1 = sin(r * 6.5 - uTime * 2.2) * 0.10;
+    float wave2 = sin(r * 10.5 - uTime * 2.9 + 1.1) * 0.06;
+    warpUv += radial * (wave1 + wave2) * uSpeaking;
+  }
+
+  // Domain warping with ORBITAL offsets. Using vec2(cos, sin)*t instead of
+  // vec2(0, t) means the noise origin swirls around rather than sliding in
+  // one direction — prevents the "scrolling up" look.
+  vec2 offA = vec2(cos(t * 0.22), sin(t * 0.22)) * 0.85;
+  vec2 offB = vec2(cos(t * 0.17 + 2.1), sin(t * 0.17 + 2.1)) * 0.75;
+  vec2 offC = vec2(cos(t * 0.19 + 4.3), sin(t * 0.19 + 4.3)) * 0.70;
+  vec2 offD = vec2(cos(t * 0.24 + 5.7), sin(t * 0.24 + 5.7)) * 0.80;
+
   vec2 q = vec2(
-    fbm(uv * 1.3 + vec2(0.00, t * 0.12)),
-    fbm(uv * 1.3 + vec2(2.10, t * 0.09))
+    fbm(warpUv * 1.3 + offA),
+    fbm(warpUv * 1.3 + offB)
   );
   vec2 s = vec2(
-    fbm(uv * 1.3 + q * 1.8 + vec2(t * 0.14, 0.00)),
-    fbm(uv * 1.3 + q * 1.8 + vec2(0.00, t * 0.16))
+    fbm(warpUv * 1.3 + q * 1.8 + offC),
+    fbm(warpUv * 1.3 + q * 1.8 + offD)
   );
-  float n = fbm(uv * 1.3 + s * amp);
+  float n = fbm(warpUv * 1.3 + s * amp);
 
   // Four-way color mix. q.x, s.y, n each drive a different blend, so the
   // result is never just linear between two colors — you get the mottled,
@@ -169,16 +190,14 @@ void main() {
   // Slight warm bias — pulls toward the coral dominant in the reference.
   color = pow(color, vec3(0.92));
 
-  // 3D shading: bright top-left highlight, dark bottom-right shadow.
-  // Makes the sphere read as a ball, not a flat disc.
+  // 3D shading: bright top-left highlight. Keeps the sphere reading
+  // as a ball without darkening the rim (user feedback: no black edge).
   vec2 toHi = uv - vec2(-0.35, -0.45);
   float hi = pow(clamp(1.0 - length(toHi) * 0.85, 0.0, 1.0), 2.4);
   color += vec3(0.30, 0.22, 0.18) * hi;
-
-  float edgeShadow = smoothstep(0.55, 1.0, r);
-  color *= mix(1.0, 0.72, edgeShadow);
-  // Extra darkening at the very rim for depth.
-  color *= mix(1.0, 0.55, smoothstep(0.88, 1.0, r));
+  // Very light rim shading for depth — stops at 0.92 multiplier, not black.
+  float edgeShade = smoothstep(0.70, 1.0, r);
+  color *= mix(1.0, 0.92, edgeShade);
 
   // Subtle grain so it doesn't look plasticky — low amplitude.
   float grain = (hash(vUv * 920.0 + t * 0.1) - 0.5) * 0.035;
@@ -231,6 +250,7 @@ export function VoiceSphere({
   seed,
   size = 160,
   speaking = false,
+  ready = false,
   withPlayIcon = false,
   className = "",
   onClick,
@@ -373,6 +393,7 @@ export function VoiceSphere({
   const cls = [
     "voice-sphere",
     speaking ? "voice-sphere--speaking" : "",
+    ready && !speaking ? "voice-sphere--ready" : "",
     onClick ? "cursor-pointer" : "",
     className,
   ]

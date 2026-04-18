@@ -12,6 +12,7 @@ import {
   type Profile,
 } from "@/lib/api";
 import { EnginePicker, useEngineChoice } from "@/components/EnginePicker";
+import { GenerationProgress } from "@/components/GenerationProgress";
 import { VoiceSphere } from "@/components/VoiceSphere";
 
 type Props = {
@@ -258,6 +259,8 @@ export function DesignTab({ onCreated }: Props) {
           {error && <span className="text-sm text-red-500">{error}</span>}
         </div>
 
+        {busy && <GenerationProgress kind={busy} estimateSeconds={12} />}
+
         {previewUrl && !result && (
           <div className="card mt-3">
             <div className="text-xs text-[color:var(--muted)] mb-2">
@@ -284,6 +287,7 @@ export function DesignTab({ onCreated }: Props) {
           seed={result?.id ?? previewSeed}
           size={220}
           speaking={audioPlaying}
+          ready={(!!previewUrl || !!result) && !audioPlaying}
         />
         {result ? (
           <div className="mt-5 w-full space-y-3">
