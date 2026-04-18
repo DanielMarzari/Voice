@@ -5,18 +5,21 @@ import {
   designVoice,
   listEngines,
   listPresets,
+  listReferences,
   listXttsSpeakers,
   previewDesign,
   sampleUrl,
+  uploadReference,
   type Engine,
   type Preset,
   type Profile,
+  type Reference,
   type XttsSpeaker,
 } from "@/lib/api";
-import { designPalette } from "@/lib/designPalette";
 import { EnginePicker, useEngineChoice } from "@/components/EnginePicker";
 import { GenerationProgress } from "@/components/GenerationProgress";
 import { VoiceSphere } from "@/components/VoiceSphere";
+import { MOODS, moodPalette } from "@/lib/moodPalettes";
 
 type Props = {
   onCreated: (p: Profile) => void;
@@ -44,6 +47,11 @@ export function DesignTab({ onCreated }: Props) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [audioPlaying, setAudioPlaying] = useState(false);
 
+  // Color mood: dropdown of curated palettes + a seed we bump on
+  // "Regenerate" to randomize within the chosen mood.
+  const [moodId, setMoodId] = useState<string>(MOODS[0].id);
+  const [paletteSeed, setPaletteSeed] = useState<number>(() => Math.random());
+
   useEffect(() => {
     return () => {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -59,6 +67,11 @@ export function DesignTab({ onCreated }: Props) {
   const [xttsSpeakers, setXttsSpeakers] = useState<XttsSpeaker[]>([]);
   const [speakerName, setSpeakerName] = useState<string | null>(null);
 
+  // User-uploaded reference clips (the "bring your own voice" path).
+  const [references, setReferences] = useState<Reference[]>([]);
+  const [uploadingRef, setUploadingRef] = useState(false);
+  const [uploadRefError, setUploadRefError] = useState<string | null>(null);
+
   useEffect(() => {
     listPresets()
       .then((ps) => {
@@ -72,8 +85,24 @@ export function DesignTab({ onCreated }: Props) {
         setBackendDefault(d.default);
       })
       .catch(() => {});
+    listReferences().then(setReferences).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function handleReferenceUpload(file: File, name: string) {
+    setUploadingRef(true);
+    setUploadRefError(null);
+    try {
+      const added = await uploadReference({ name, file });
+      setReferences((r) => [...r.filter((x) => x.id !== added.id), added]);
+      // Auto-select the newly uploaded reference.
+      setBaseVoice(added.id);
+    } catch (e) {
+      setUploadRefError((e as Error).message);
+    } finally {
+      setUploadingRef(false);
+    }
+  }
 
   // Keep language valid for the chosen engine.
   useEffect(() => {
@@ -108,6 +137,9 @@ export function DesignTab({ onCreated }: Props) {
 
   const selectPreset = (id: string) => {
     setBaseVoice(id);
+    // Only built-in mood presets carry slider defaults. User references
+    // (id prefixed with "user:") leave the sliders untouched so the
+    // user can keep whatever they were fine-tuning.
     const p = presets.find((x) => x.id === id);
     if (p) {
       setSliders({
@@ -118,10 +150,14 @@ export function DesignTab({ onCreated }: Props) {
     }
   };
 
-  // Slider-driven palette: pitch → red, speed → yellow, temperature →
-  // green, with a cool blue-violet anchor for guaranteed contrast.
+  // Curated color mood. Picking a mood gives a stable "emotional register"
+  // (Vibrant / Calm / Sunset / Ocean / etc.); Regenerate reshuffles
+  // within that mood so the user can nudge without leaving the vibe.
   // Declared up here so both the sphere prop and onSave() dep list see it.
-  const livePalette = useMemo(() => designPalette(sliders), [sliders]);
+  const livePalette = useMemo(
+    () => moodPalette(moodId, paletteSeed),
+    [moodId, paletteSeed]
+  );
 
   const onPreview = useCallback(async () => {
     if (!baseVoice || !engine || busy) return;
@@ -207,9 +243,10 @@ export function DesignTab({ onCreated }: Props) {
           />
         )}
 
-        {/* XTTS built-in speakers — gives real female/male choices instead
-            of always cloning the same (male) reference clip. F5 has no
-            equivalent; its "base voice" is the fallback reference. */}
+        {/* XTTS built-in speakers — 58 pre-trained voices, explicitly
+            gendered, no reference clip needed. Only shown when XTTS is
+            the selected engine. When XTTS isn't installed the list is
+            empty and we show a hint pointing to the Upload alternative. */}
         {engine === "xtts" && xttsSpeakers.length > 0 && (
           <div>
             <label className="block text-sm font-medium mb-1.5">
@@ -247,6 +284,18 @@ export function DesignTab({ onCreated }: Props) {
                 </optgroup>
               )}
             </select>
+            <div className="text-xs text-[color:var(--muted)] mt-1">
+              When a speaker is selected, XTTS uses it directly and ignores
+              the Base voice reference clip below.
+            </div>
+          </div>
+        )}
+        {engine === "xtts" && xttsSpeakers.length === 0 && (
+          <div className="card !p-3 text-xs text-[color:var(--muted)]">
+            XTTS built-in speaker list unavailable
+            {engines?.find((e) => e.id === "xtts" && !e.available)
+              ? ": the TTS package isn't installed. Run `pip install TTS>=0.22` in backend/ and restart, or use the Upload button below to bring your own reference clip."
+              : ". Wait for the first synthesis to load XTTS, then refresh. In the meantime, Upload a reference clip below to get any voice you want."}
           </div>
         )}
 
@@ -254,22 +303,67 @@ export function DesignTab({ onCreated }: Props) {
           <label className="block text-sm font-medium mb-1.5">
             Base voice
             <span className="ml-2 text-xs text-[color:var(--muted)] font-normal">
-              sets default slider positions
+              built-in mood OR your own upload
             </span>
           </label>
-          <select
-            className="select"
-            value={baseVoice}
-            onChange={(e) => selectPreset(e.target.value)}
-            disabled={!presets.length}
-          >
-            {presets.length === 0 && <option>Loading presets…</option>}
-            {presets.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.label}
-              </option>
-            ))}
-          </select>
+          <div className="flex gap-2 items-stretch">
+            <select
+              className="select flex-1"
+              value={baseVoice}
+              onChange={(e) => selectPreset(e.target.value)}
+              disabled={!presets.length}
+            >
+              <optgroup label="Built-in moods">
+                {presets.length === 0 && <option>Loading presets…</option>}
+                {presets.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label}
+                  </option>
+                ))}
+              </optgroup>
+              {references.length > 0 && (
+                <optgroup label="Your uploaded voices">
+                  {references.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.label}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+            <label
+              className="btn cursor-pointer"
+              title="Upload a reference audio clip — any voice, any gender"
+            >
+              {uploadingRef ? "Uploading…" : "⇡ Upload"}
+              <input
+                type="file"
+                accept="audio/*,.wav,.mp3,.m4a,.ogg,.flac"
+                className="hidden"
+                disabled={uploadingRef}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (!f) return;
+                  const defaultName = f.name.replace(/\.[^.]+$/, "");
+                  const name = prompt(
+                    "Name this voice (e.g. 'Sarah soft female', 'narrator deep'):",
+                    defaultName
+                  );
+                  if (name && name.trim()) {
+                    void handleReferenceUpload(f, name.trim());
+                  }
+                  // Reset the input so picking the same file again still fires.
+                  e.target.value = "";
+                }}
+              />
+            </label>
+          </div>
+          {uploadRefError && (
+            <div className="text-xs text-red-500 mt-1">{uploadRefError}</div>
+          )}
+          <div className="text-xs text-[color:var(--muted)] mt-1">
+            Drop a ~10s clean speech clip. Works with both F5-TTS and XTTS.
+          </div>
         </div>
 
         <Slider
@@ -300,6 +394,55 @@ export function DesignTab({ onCreated }: Props) {
           onChange={(v) => update("temperature", v)}
           hint="Higher = more expressive, more variance"
         />
+
+        {/* Color mood — independent of pitch/speed/temp now. Dropdown
+            picks the emotional register; Regenerate reshuffles within it. */}
+        <div>
+          <label className="block text-sm font-medium mb-1.5">
+            Color mood
+            <span className="ml-2 text-xs text-[color:var(--muted)] font-normal">
+              sets the sphere palette
+            </span>
+          </label>
+          <div className="flex gap-2">
+            <select
+              className="select flex-1"
+              value={moodId}
+              onChange={(e) => {
+                setMoodId(e.target.value);
+                setPaletteSeed(Math.random());
+              }}
+            >
+              {MOODS.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setPaletteSeed(Math.random())}
+              title="Reshuffle colors within this mood"
+            >
+              ⟳ Regenerate
+            </button>
+          </div>
+          {/* Tiny color-chip preview — 4 dots matching the current palette */}
+          <div className="flex gap-1.5 mt-2">
+            {livePalette.map((c, i) => (
+              <span
+                key={i}
+                className="inline-block w-4 h-4 rounded-full border border-[color:var(--border)]"
+                style={{ background: c }}
+                aria-hidden
+              />
+            ))}
+            <span className="text-xs text-[color:var(--muted)] ml-2 self-center">
+              {MOODS.find((m) => m.id === moodId)?.description}
+            </span>
+          </div>
+        </div>
 
         <div>
           <label className="block text-sm font-medium mb-1.5">Preview text</label>

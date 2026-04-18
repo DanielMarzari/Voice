@@ -173,6 +173,43 @@ def list_presets():
     return {"presets": tts.PRESETS}
 
 
+@app.get("/api/references")
+def list_references():
+    """User-uploaded reference clips (from the Design tab). Separate from
+    the built-in mood presets — these are distinct reference voices the
+    user wants to synthesize in."""
+    return {"references": tts.list_user_references()}
+
+
+@app.post("/api/references")
+async def upload_reference(
+    name: str = Form(..., min_length=1, max_length=60),
+    audio_file: UploadFile = File(...),
+    transcript: str = Form(""),
+):
+    """Save a user-uploaded reference clip. Any common audio format works
+    — it gets transcoded to 24 kHz mono WAV via ffmpeg. Use this to bring
+    your own female voice, character voice, etc. regardless of engine."""
+    raw = await audio_file.read()
+    if not raw:
+        raise HTTPException(400, "audio_file is empty")
+    if len(raw) > 10 * 1024 * 1024:
+        raise HTTPException(413, "audio too large (max 10 MB)")
+    try:
+        info = tts.save_user_reference(name=name, audio_bytes=raw, transcript=transcript)
+    except Exception as e:
+        log.exception("reference save failed")
+        raise HTTPException(500, f"Save failed: {e}")
+    return {"reference": info}
+
+
+@app.delete("/api/references/{slug}")
+def remove_reference(slug: str):
+    if tts.delete_user_reference(slug):
+        return {"deleted": slug}
+    raise HTTPException(404, f"Reference '{slug}' not found")
+
+
 @app.post("/api/clone")
 async def clone_voice(
     name: str = Form("Preview", min_length=1, max_length=60),

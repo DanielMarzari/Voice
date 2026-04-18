@@ -307,7 +307,9 @@ def list_engines() -> list[dict]:
 # on the frontend sliders — the user can always nudge from there.
 
 PRESET_DIR = Path(__file__).parent / "data" / "presets"
+USER_REF_DIR = PRESET_DIR / "user"
 PRESET_DIR.mkdir(parents=True, exist_ok=True)
+USER_REF_DIR.mkdir(parents=True, exist_ok=True)
 
 _FALLBACK_REF_URL = (
     "https://raw.githubusercontent.com/SWivid/F5-TTS/main/"
@@ -317,6 +319,11 @@ _FALLBACK_REF_TEXT = (
     "Some call me nature. Others call me mother nature."
 )
 
+# Built-in mood presets — slider defaults only. The underlying reference
+# clip is shared (auto-downloaded fallback) so these are purely about
+# starting-slider positions. For distinct voices (female / male / other
+# character), users drop WAVs into data/presets/user/ via the Design tab's
+# "Upload reference" button.
 PRESETS = [
     {
         "id": "amber",
@@ -413,12 +420,92 @@ def _resolve_base_reference() -> tuple[str, str]:
 
 
 def resolve_preset(preset_id: str) -> tuple[str, str]:
-    """Return (ref_audio_path, ref_text). All presets share one reference
-    clip — their 'personality' is expressed via the slider defaults the
-    frontend applies. Keeps setup friction to zero."""
+    """Return (ref_audio_path, ref_text) for a base-voice dropdown entry.
+
+    Accepts three namespaces:
+      * "amber" / "cobalt" / "rose" / "slate" — built-in mood presets.
+        All share a single reference clip (auto-downloaded / F5 bundled);
+        they differ only in slider defaults. Call _resolve_base_reference.
+      * "user:<slug>" — user-uploaded reference under data/presets/user/.
+        Looks up backend/data/presets/user/<slug>.wav (+ optional .txt).
+    """
+    if preset_id.startswith("user:"):
+        slug = preset_id.split(":", 1)[1]
+        wav = USER_REF_DIR / f"{slug}.wav"
+        if not wav.exists():
+            raise FileNotFoundError(
+                f"User reference '{slug}' not found at {wav}. "
+                f"Re-upload it from the Design tab."
+            )
+        txt_path = USER_REF_DIR / f"{slug}.txt"
+        ref_text = txt_path.read_text().strip() if txt_path.exists() else ""
+        return str(wav), ref_text
+
     if not any(p["id"] == preset_id for p in PRESETS):
         raise ValueError(f"Unknown preset id: {preset_id}")
     return _resolve_base_reference()
+
+
+def list_user_references() -> list[dict]:
+    """List WAVs dropped into data/presets/user/, for the Design tab dropdown."""
+    if not USER_REF_DIR.exists():
+        return []
+    out = []
+    for p in sorted(USER_REF_DIR.iterdir()):
+        if not p.is_file() or p.suffix.lower() != ".wav":
+            continue
+        out.append({
+            "id": f"user:{p.stem}",
+            "label": p.stem.replace("_", " ").replace("-", " ").strip(),
+            "path": str(p),
+        })
+    return out
+
+
+def save_user_reference(name: str, audio_bytes: bytes, transcript: str = "") -> dict:
+    """Save an uploaded audio clip as a new user reference.
+
+    Converts whatever format the user gave us (WAV / MP3 / M4A / ...) to
+    24 kHz mono WAV via pydub/ffmpeg — F5 and XTTS both want WAV at that
+    rate. Returns the preset-descriptor dict matching list_user_references().
+    """
+    from pydub import AudioSegment
+    import io as _io
+    import re as _re
+
+    slug = _re.sub(r"[^a-z0-9_-]+", "-", name.lower().strip()).strip("-") or "reference"
+    # Avoid clobber — add a numeric suffix if the slug already exists.
+    target = USER_REF_DIR / f"{slug}.wav"
+    i = 2
+    while target.exists():
+        target = USER_REF_DIR / f"{slug}-{i}.wav"
+        i += 1
+
+    seg = AudioSegment.from_file(_io.BytesIO(audio_bytes))
+    seg = seg.set_frame_rate(24000).set_channels(1)
+    USER_REF_DIR.mkdir(parents=True, exist_ok=True)
+    seg.export(target, format="wav")
+
+    if transcript.strip():
+        (USER_REF_DIR / f"{target.stem}.txt").write_text(transcript.strip())
+
+    return {
+        "id": f"user:{target.stem}",
+        "label": target.stem.replace("_", " ").replace("-", " "),
+        "path": str(target),
+    }
+
+
+def delete_user_reference(slug: str) -> bool:
+    """Remove a user reference clip + its transcript."""
+    wav = USER_REF_DIR / f"{slug}.wav"
+    txt = USER_REF_DIR / f"{slug}.txt"
+    ok = False
+    for p in (wav, txt):
+        if p.exists():
+            p.unlink()
+            ok = True
+    return ok
 
 
 # ---------------- Audio helpers ----------------

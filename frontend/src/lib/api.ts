@@ -91,6 +91,37 @@ export async function listXttsSpeakers(): Promise<XttsSpeaker[]> {
   return d.speakers;
 }
 
+// User-uploaded reference clips (Design tab "Upload reference audio").
+export type Reference = { id: string; label: string; path: string };
+
+export async function listReferences(): Promise<Reference[]> {
+  const d = await j<{ references: Reference[] }>(await fetch(u("/api/references")));
+  return d.references;
+}
+
+export async function uploadReference(args: {
+  name: string;
+  file: File;
+  transcript?: string;
+}): Promise<Reference> {
+  const fd = new FormData();
+  fd.append("name", args.name);
+  fd.append("audio_file", args.file);
+  if (args.transcript) fd.append("transcript", args.transcript);
+  const d = await j<{ reference: Reference }>(
+    await fetch(u("/api/references"), { method: "POST", body: fd })
+  );
+  return d.reference;
+}
+
+export async function deleteReference(slug: string): Promise<void> {
+  await j(
+    await fetch(u(`/api/references/${encodeURIComponent(slug)}`), {
+      method: "DELETE",
+    })
+  );
+}
+
 export async function listProfiles(): Promise<Profile[]> {
   const d = await j<{ profiles: Profile[] }>(await fetch(u("/api/profiles")));
   return d.profiles;
