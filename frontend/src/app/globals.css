@@ -134,66 +134,133 @@ html, body {
   padding: 16px;
 }
 
-/* --- Voice Sphere --- */
-@keyframes sphere-rotate {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(360deg); }
-}
-@keyframes sphere-drift {
-  0%   { transform: translate3d(0, 0, 0) scale(1); }
-  50%  { transform: translate3d(0, -3%, 0) scale(1.03); }
-  100% { transform: translate3d(0, 0, 0) scale(1); }
-}
-@keyframes sphere-grain {
-  0%   { background-position: 0 0; }
-  100% { background-position: 128px 96px; }
-}
+/* --- Voice Sphere (ElevenLabs-style planetary orb) ---
+   Four large radial-gradient blobs drift inside a circular mask. Prime-numbered
+   animation durations keep them from ever resyncing, so the motion reads like
+   clouds/water, not a clock. The `.voice-sphere--speaking` modifier tightens
+   everything toward the center and adds an outward ripple — the disruption.
+   Keep this block in sync with DanielMarzari/Reader's globals.css. */
 
 .voice-sphere {
   position: relative;
   border-radius: 50%;
   overflow: hidden;
-  isolation: isolate;
-  background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.35), transparent 45%),
-              radial-gradient(circle at 70% 75%, rgba(0,0,0,0.15), transparent 55%),
-              conic-gradient(var(--sphere-g, from 0deg at 50% 50%,
-                var(--c1, #f6b4a6), var(--c2, #d58cff), var(--c3, #6190ff),
-                var(--c4, #9effd8), var(--c1, #f6b4a6)));
-  filter: saturate(1.05);
+  isolation: isolate;        /* so the blobs' blur doesn't bleed onto siblings */
+  filter: saturate(1.08);
   box-shadow:
-    inset 0 0 50px rgba(0,0,0,0.12),
-    inset 0 -12px 40px rgba(0,0,0,0.18),
-    inset 0 12px 40px rgba(255,255,255,0.25),
-    0 8px 28px rgba(0,0,0,0.08);
-}
-.voice-sphere::before {
-  content: "";
-  position: absolute;
-  inset: -20%;
-  background:
-    conic-gradient(from 0deg at 50% 50%,
-      var(--c1, #f6b4a6), var(--c2, #d58cff), var(--c3, #6190ff),
-      var(--c4, #9effd8), var(--c1, #f6b4a6));
-  filter: blur(18px);
-  animation: sphere-rotate 28s linear infinite;
-  opacity: 0.85;
-  z-index: -1;
-}
-.voice-sphere::after {
-  /* CSS noise grain — keeps things from looking too plasticky. */
-  content: "";
-  position: absolute;
-  inset: 0;
-  background-image:
-    radial-gradient(rgba(255,255,255,0.10) 1px, transparent 1px),
-    radial-gradient(rgba(0,0,0,0.08) 1px, transparent 1px);
-  background-size: 3px 3px, 5px 5px;
-  background-position: 0 0, 1px 1px;
-  mix-blend-mode: overlay;
-  pointer-events: none;
-  animation: sphere-grain 6s linear infinite;
+    inset 0 -10px 30px rgba(0, 0, 0, 0.18),
+    inset 0 14px 40px rgba(255, 255, 255, 0.30),
+    0 10px 28px rgba(0, 0, 0, 0.08);
 }
 
+.voice-sphere-blob {
+  position: absolute;
+  inset: -25%;
+  border-radius: 50%;
+  /* Large soft blob anchored at var(--blob-x/y); heavy blur is what gives
+     the cloud-like feel rather than a hard pinwheel. */
+  background: radial-gradient(
+    circle at var(--blob-x, 50%) var(--blob-y, 50%),
+    var(--blob-color) 0%,
+    transparent 55%
+  );
+  filter: blur(22px);
+  opacity: 0.88;
+  will-change: transform, opacity;
+  pointer-events: none;
+  mix-blend-mode: normal;
+  animation-name: sphere-drift-a;
+  animation-duration: 13s;
+  animation-iteration-count: infinite;
+  animation-timing-function: cubic-bezier(0.42, 0.0, 0.58, 1.0);
+}
+/* Give each blob its own tempo + drift path — prime seconds, varied
+   keyframes. Total period = LCM(11, 13, 17, 19) = huge, so it never repeats. */
+.voice-sphere-blob-1 { animation-duration: 11s; animation-name: sphere-drift-a; }
+.voice-sphere-blob-2 { animation-duration: 13s; animation-name: sphere-drift-b; animation-direction: reverse; }
+.voice-sphere-blob-3 { animation-duration: 17s; animation-name: sphere-drift-c; }
+.voice-sphere-blob-4 { animation-duration: 19s; animation-name: sphere-drift-d; animation-direction: reverse; }
+
+@keyframes sphere-drift-a {
+  0%   { transform: translate(-14%,  -8%) scale(1.10); }
+  33%  { transform: translate( 12%, -12%) scale(1.00); }
+  66%  { transform: translate( 18%,  14%) scale(1.15); }
+  100% { transform: translate(-14%,  -8%) scale(1.10); }
+}
+@keyframes sphere-drift-b {
+  0%   { transform: translate( 10%,  16%) scale(1.05); }
+  25%  { transform: translate(-12%,   4%) scale(1.12); }
+  75%  { transform: translate( -6%, -14%) scale(0.96); }
+  100% { transform: translate( 10%,  16%) scale(1.05); }
+}
+@keyframes sphere-drift-c {
+  0%   { transform: translate( 16%, -10%) scale(1.08); }
+  40%  { transform: translate( -4%,  12%) scale(1.18); }
+  80%  { transform: translate(-14%, -10%) scale(1.00); }
+  100% { transform: translate( 16%, -10%) scale(1.08); }
+}
+@keyframes sphere-drift-d {
+  0%   { transform: translate(-10%,  12%) scale(1.02); }
+  50%  { transform: translate( 14%, -16%) scale(1.15); }
+  100% { transform: translate(-10%,  12%) scale(1.02); }
+}
+
+/* Specular highlight — a soft light coming from the upper-left makes the
+   orb read as a 3D sphere even though the blobs are flat. */
+.voice-sphere-gloss {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 30% 25%, rgba(255, 255, 255, 0.45), transparent 42%),
+    radial-gradient(circle at 70% 80%, rgba(0, 0, 0, 0.12), transparent 55%);
+  mix-blend-mode: soft-light;
+}
+
+/* --- Speaking state: disruption --- */
+/* Blobs contract toward center and cycle ~4× faster. */
+.voice-sphere--speaking .voice-sphere-blob {
+  animation-duration: 3.5s !important;
+  animation-name: sphere-pulse-center !important;
+  animation-timing-function: ease-in-out !important;
+  filter: blur(16px);
+  opacity: 0.92;
+}
+.voice-sphere--speaking .voice-sphere-blob-2 { animation-duration: 4.1s !important; }
+.voice-sphere--speaking .voice-sphere-blob-3 { animation-duration: 4.7s !important; }
+.voice-sphere--speaking .voice-sphere-blob-4 { animation-duration: 5.3s !important; }
+
+@keyframes sphere-pulse-center {
+  0%, 100% { transform: translate(0, 0) scale(1.05); }
+  50%      { transform: translate(0, 0) scale(0.78); }
+}
+
+/* Ripple emanating from the center — the "voice disruption" signal. */
+.voice-sphere-ripple {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 20%;
+  height: 20%;
+  border-radius: 50%;
+  pointer-events: none;
+  box-shadow:
+    0 0 0 0 rgba(255, 255, 255, 0.55),
+    0 0 0 0 rgba(255, 255, 255, 0.35);
+  animation: sphere-ripple 1.6s ease-out infinite;
+  transform: translate(-50%, -50%);
+}
+@keyframes sphere-ripple {
+  0%   { box-shadow: 0 0 0 0   rgba(255, 255, 255, 0.55),
+                      0 0 0 0   rgba(255, 255, 255, 0.25); }
+  70%  { box-shadow: 0 0 0 38% rgba(255, 255, 255, 0.0),
+                      0 0 0 22% rgba(255, 255, 255, 0.08); }
+  100% { box-shadow: 0 0 0 48% rgba(255, 255, 255, 0),
+                      0 0 0 30% rgba(255, 255, 255, 0); }
+}
+
+/* Play icon — sits in the middle when not speaking. */
 .voice-sphere-play {
   position: absolute;
   inset: 0;
@@ -201,15 +268,20 @@ html, body {
   align-items: center;
   justify-content: center;
   color: #111;
-  background: rgba(255,255,255,0.85);
-  width: 36%;
-  height: 36%;
+  background: rgba(255, 255, 255, 0.85);
+  width: 32%;
+  height: 32%;
   margin: auto;
   border-radius: 50%;
   font-size: 140%;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-  transition: transform 120ms ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  transition: transform 120ms ease, opacity 120ms ease;
+  pointer-events: none;
 }
 .voice-sphere:hover .voice-sphere-play { transform: scale(1.06); }
 
-.voice-sphere-static::before { animation: none; }
+/* Respect reduced-motion settings: stop the animations, keep the look. */
+@media (prefers-reduced-motion: reduce) {
+  .voice-sphere-blob,
+  .voice-sphere-ripple { animation: none !important; }
+}

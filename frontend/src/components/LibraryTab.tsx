@@ -73,6 +73,7 @@ export function LibraryTab({ refreshKey }: Props) {
           <VoiceSphere
             seed={p.id}
             size={120}
+            speaking={playing === p.id}
             withPlayIcon={playing !== p.id}
             onClick={() => setPlaying(playing === p.id ? null : p.id)}
           />

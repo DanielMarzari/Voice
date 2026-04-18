@@ -27,6 +27,7 @@ export function CloneTab({ onCreated }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Profile | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [audioPlaying, setAudioPlaying] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Clean up object URLs to avoid leaking blob memory.
@@ -241,7 +242,15 @@ export function CloneTab({ onCreated }: Props) {
             <div className="text-xs text-[color:var(--muted)] mb-2">
               Preview (not saved)
             </div>
-            <audio controls autoPlay className="w-full" src={previewUrl} />
+            <audio
+              controls
+              autoPlay
+              className="w-full"
+              src={previewUrl}
+              onPlay={() => setAudioPlaying(true)}
+              onPause={() => setAudioPlaying(false)}
+              onEnded={() => setAudioPlaying(false)}
+            />
             <div className="text-xs text-[color:var(--muted)] mt-2">
               Sound good? Give it a name above and hit <strong>Save voice</strong>.
             </div>
@@ -253,6 +262,7 @@ export function CloneTab({ onCreated }: Props) {
         <VoiceSphere
           seed={result?.id ?? name ?? "preview"}
           size={220}
+          speaking={audioPlaying}
           withPlayIcon={false}
         />
         {result ? (
@@ -266,6 +276,9 @@ export function CloneTab({ onCreated }: Props) {
             <audio
               controls
               className="w-full"
+              onPlay={() => setAudioPlaying(true)}
+              onPause={() => setAudioPlaying(false)}
+              onEnded={() => setAudioPlaying(false)}
               src={`/api/profiles/${result.id}/sample`}
             />
           </div>

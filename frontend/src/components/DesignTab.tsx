@@ -37,6 +37,7 @@ export function DesignTab({ onCreated }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Profile | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [audioPlaying, setAudioPlaying] = useState(false);
 
   useEffect(() => {
     return () => {
@@ -261,7 +262,15 @@ export function DesignTab({ onCreated }: Props) {
             <div className="text-xs text-[color:var(--muted)] mb-2">
               Preview (not saved)
             </div>
-            <audio controls autoPlay className="w-full" src={previewUrl} />
+            <audio
+              controls
+              autoPlay
+              className="w-full"
+              src={previewUrl}
+              onPlay={() => setAudioPlaying(true)}
+              onPause={() => setAudioPlaying(false)}
+              onEnded={() => setAudioPlaying(false)}
+            />
             <div className="text-xs text-[color:var(--muted)] mt-2">
               Sound good? Name it above and hit <strong>Save voice</strong>.
             </div>
@@ -270,7 +279,11 @@ export function DesignTab({ onCreated }: Props) {
       </div>
 
       <div className="flex flex-col items-center">
-        <VoiceSphere seed={result?.id ?? previewSeed} size={220} />
+        <VoiceSphere
+          seed={result?.id ?? previewSeed}
+          size={220}
+          speaking={audioPlaying}
+        />
         {result ? (
           <div className="mt-5 w-full space-y-3">
             <div className="text-center">
@@ -283,6 +296,9 @@ export function DesignTab({ onCreated }: Props) {
               controls
               className="w-full"
               src={`/api/profiles/${result.id}/sample`}
+              onPlay={() => setAudioPlaying(true)}
+              onPause={() => setAudioPlaying(false)}
+              onEnded={() => setAudioPlaying(false)}
             />
           </div>
         ) : (

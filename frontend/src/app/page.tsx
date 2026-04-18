@@ -5,6 +5,7 @@ import { getHealth, type Health, type Profile } from "@/lib/api";
 import { CloneTab } from "@/components/CloneTab";
 import { DesignTab } from "@/components/DesignTab";
 import { LibraryTab } from "@/components/LibraryTab";
+import { VoiceSphere } from "@/components/VoiceSphere";
 
 type TabKey = "clone" | "design" | "library";
 
@@ -115,21 +116,6 @@ function HealthPill({ health }: { health: Health | null }) {
 }
 
 function SphereLogo() {
-  // Little static version of the sphere for the header.
-  return (
-    <div
-      className="voice-sphere voice-sphere-static"
-      style={
-        {
-          width: "32px",
-          height: "32px",
-          "--c1": "#f6b4a6",
-          "--c2": "#d58cff",
-          "--c3": "#6190ff",
-          "--c4": "#9effd8",
-        } as React.CSSProperties & Record<string, string>
-      }
-      aria-hidden
-    />
-  );
+  // Tiny sphere for the header — reuses the animated component.
+  return <VoiceSphere seed="voice-studio-logo" size={32} />;
 }
