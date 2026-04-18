@@ -1,0 +1,19 @@
+# Voice Studio backend deps.
+# Install: python3.11 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
+# (F5-TTS pulls torch, torchaudio, numpy, etc. transitively.)
+
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9
+python-dotenv>=1.0
+httpx>=0.27
+pydantic>=2.7
+
+# Audio
+soundfile>=0.12
+pydub>=0.25
+numpy>=1.26,<2.0
+
+# TTS — F5-TTS (Apache 2.0). This brings torch + torchaudio on install.
+# On Apple Silicon: torch builds automatically use MPS when device='mps'.
+f5-tts>=0.3
