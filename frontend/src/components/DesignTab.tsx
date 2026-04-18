@@ -1,16 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   designVoice,
   listEngines,
   listPresets,
+  listXttsSpeakers,
   previewDesign,
   sampleUrl,
   type Engine,
   type Preset,
   type Profile,
+  type XttsSpeaker,
 } from "@/lib/api";
+import { designPalette } from "@/lib/designPalette";
 import { EnginePicker, useEngineChoice } from "@/components/EnginePicker";
 import { GenerationProgress } from "@/components/GenerationProgress";
 import { VoiceSphere } from "@/components/VoiceSphere";
@@ -52,6 +55,10 @@ export function DesignTab({ onCreated }: Props) {
   const [engine, setEngine] = useEngineChoice(engines, backendDefault);
   const [language, setLanguage] = useState("en");
 
+  // XTTS built-in speakers (female / male options) — fetched when XTTS is chosen.
+  const [xttsSpeakers, setXttsSpeakers] = useState<XttsSpeaker[]>([]);
+  const [speakerName, setSpeakerName] = useState<string | null>(null);
+
   useEffect(() => {
     listPresets()
       .then((ps) => {
@@ -76,6 +83,25 @@ export function DesignTab({ onCreated }: Props) {
       setLanguage(e.languages[0] ?? "en");
     }
   }, [engine, engines, language]);
+
+  // Fetch XTTS built-in speakers lazily when XTTS becomes the chosen engine.
+  useEffect(() => {
+    if (engine !== "xtts") {
+      setSpeakerName(null);
+      return;
+    }
+    if (xttsSpeakers.length > 0) return;
+    listXttsSpeakers()
+      .then((sp) => {
+        setXttsSpeakers(sp);
+        // Default to the first female speaker so the baseline isn't "male."
+        const firstFemale = sp.find((s) => s.gender === "female");
+        setSpeakerName((firstFemale ?? sp[0])?.name ?? null);
+      })
+      .catch(() => {
+        // Non-fatal — fall back to reference-clip cloning.
+      });
+  }, [engine, xttsSpeakers.length]);
 
   const update = <K extends keyof Sliders>(key: K, val: Sliders[K]) =>
     setSliders((s) => ({ ...s, [key]: val }));
@@ -108,6 +134,7 @@ export function DesignTab({ onCreated }: Props) {
         pitch: sliders.pitch,
         speed: sliders.speed,
         temperature: sliders.temperature,
+        speakerName: engine === "xtts" ? speakerName : null,
         previewText: previewText.trim() || undefined,
       });
       setPreviewUrl(url);
@@ -116,7 +143,7 @@ export function DesignTab({ onCreated }: Props) {
     } finally {
       setBusy(null);
     }
-  }, [baseVoice, engine, language, sliders, previewText, busy, previewUrl]);
+  }, [baseVoice, engine, language, sliders, previewText, speakerName, busy, previewUrl]);
 
   const onSave = useCallback(async () => {
     if (!name.trim() || !baseVoice || !engine || busy) return;
@@ -132,6 +159,7 @@ export function DesignTab({ onCreated }: Props) {
         pitch: sliders.pitch,
         speed: sliders.speed,
         temperature: sliders.temperature,
+        speakerName: engine === "xtts" ? speakerName : null,
         previewText: previewText.trim() || undefined,
       });
       setResult(p);
@@ -141,11 +169,17 @@ export function DesignTab({ onCreated }: Props) {
     } finally {
       setBusy(null);
     }
-  }, [name, baseVoice, engine, language, sliders, previewText, busy, onCreated]);
+  }, [name, baseVoice, engine, language, sliders, previewText, speakerName, busy, onCreated]);
 
-  // Seed for preview sphere — changes as knobs move so user gets visual
-  // feedback before hitting synthesize.
-  const previewSeed = `${engine}:${baseVoice}:${sliders.pitch.toFixed(1)}:${sliders.speed.toFixed(2)}:${sliders.temperature.toFixed(2)}`;
+  // Seed for preview sphere — static so the sphere identity doesn't jump
+  // every time a slider moves. The colors (below) are what change.
+  const previewSeed = `${engine}:${baseVoice}:${speakerName ?? ""}`;
+  // Slider-driven palette: pitch → color0, temperature → color1,
+  // speed → color2, cool accent computed for always-present contrast.
+  const livePalette = useMemo(
+    () => designPalette(sliders),
+    [sliders]
+  );
 
   return (
     <div className="grid md:grid-cols-[1fr_320px] gap-8 items-start">
@@ -170,6 +204,49 @@ export function DesignTab({ onCreated }: Props) {
             language={language}
             onLanguageChange={setLanguage}
           />
+        )}
+
+        {/* XTTS built-in speakers — gives real female/male choices instead
+            of always cloning the same (male) reference clip. F5 has no
+            equivalent; its "base voice" is the fallback reference. */}
+        {engine === "xtts" && xttsSpeakers.length > 0 && (
+          <div>
+            <label className="block text-sm font-medium mb-1.5">
+              Speaker voice
+              <span className="ml-2 text-xs text-[color:var(--muted)] font-normal">
+                XTTS built-in — pick gender / tone
+              </span>
+            </label>
+            <select
+              className="select"
+              value={speakerName ?? ""}
+              onChange={(e) => setSpeakerName(e.target.value || null)}
+            >
+              <optgroup label="Female">
+                {xttsSpeakers
+                  .filter((s) => s.gender === "female")
+                  .map((s) => (
+                    <option key={s.name} value={s.name}>{s.name}</option>
+                  ))}
+              </optgroup>
+              <optgroup label="Male">
+                {xttsSpeakers
+                  .filter((s) => s.gender === "male")
+                  .map((s) => (
+                    <option key={s.name} value={s.name}>{s.name}</option>
+                  ))}
+              </optgroup>
+              {xttsSpeakers.some((s) => s.gender === "unknown") && (
+                <optgroup label="Other">
+                  {xttsSpeakers
+                    .filter((s) => s.gender === "unknown")
+                    .map((s) => (
+                      <option key={s.name} value={s.name}>{s.name}</option>
+                    ))}
+                </optgroup>
+              )}
+            </select>
+          </div>
         )}
 
         <div>
@@ -288,6 +365,7 @@ export function DesignTab({ onCreated }: Props) {
           size={220}
           speaking={audioPlaying}
           ready={(!!previewUrl || !!result) && !audioPlaying}
+          colors={livePalette}
         />
         {result ? (
           <div className="mt-5 w-full space-y-3">

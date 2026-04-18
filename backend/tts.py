@@ -84,8 +84,14 @@ class _Engine(ABC):
         ref_text: Optional[str] = None,
         speed: float = 1.0,
         language: str = "en",
+        speaker_name: Optional[str] = None,
     ) -> SynthesisResult:
-        """Generate audio for `text`, conditioned on `ref_audio_path`."""
+        """Generate audio for `text`.
+
+        XTTS uses `speaker_name` (a built-in speaker from its catalog) if
+        provided; otherwise clones from `ref_audio_path`. F5 always uses
+        `ref_audio_path` and ignores `speaker_name`.
+        """
 
     def info(self) -> dict:
         return {
@@ -129,6 +135,7 @@ class _F5Engine(_Engine):
         ref_text: Optional[str] = None,
         speed: float = 1.0,
         language: str = "en",
+        speaker_name: Optional[str] = None,  # F5 ignores this
     ) -> SynthesisResult:
         self._load()
         wav, sr, _ = self._model.infer(  # type: ignore[union-attr]
@@ -154,6 +161,45 @@ class _XTTSEngine(_Engine):
         "en", "es", "fr", "de", "it", "pt", "pl", "tr", "ru", "nl",
         "cs", "ar", "zh", "ja", "hu", "ko", "hi",
     ]
+
+    # XTTS ships ~58 built-in speakers, explicitly gendered — we expose
+    # them for the Design tab so users can pick a female or male voice
+    # without having to bring their own reference clip.
+    def list_speakers(self) -> list[dict]:
+        self._load()
+        speakers: list[str] = list(getattr(self._model, "speakers", []) or [])
+        # Best-effort gender inference. XTTS doesn't ship gender labels
+        # machine-readable; these are known manually. We fall back to
+        # "unknown" for anything not in the table.
+        known_female = {
+            "Claribel Dervla", "Daisy Studious", "Gracie Wise", "Tammie Ema",
+            "Alison Dietlinde", "Ana Florence", "Annmarie Nele", "Asya Anara",
+            "Brenda Stern", "Gitta Nikolina", "Henriette Usha", "Sofia Hellen",
+            "Tammy Grit", "Tanja Adelina", "Vjollca Johnnie", "Nova Hogarth",
+            "Maja Ruoho", "Uta Obando", "Lidiya Szekeres", "Chandra MacFarland",
+            "Szofi Granger", "Camilla Holmström", "Lilya Stainthorpe",
+            "Zofija Kendrick", "Narelle Moon", "Barbora MacLean", "Alexandra Hisakawa",
+            "Alma María", "Rosemary Okafor", "Ige Behringer", "Filip Traverse",
+        }
+        known_male = {
+            "Damien Black", "Ferran Simen", "Viktor Eka", "Luis Moray",
+            "Baldur Sanjin", "Craig Gutsy", "Marcos Rudaski", "Wulf Carlevaro",
+            "Eugenio Mataracı", "Kumar Dahl", "Dionisio Schuyler", "Royston Min",
+            "Abrahan Mack", "Adde Michal", "Badr Odhiambo", "Dionisio Schuyler",
+            "Gilberto Mathias", "Ilkin Urbano", "Kazuhiko Atallah", "Ludvig Milivoj",
+            "Suad Qasim", "Torcull Diarmuid", "Viktor Menelaos", "Zacharie Aimilios",
+            "Nova Hogarth", "Maja Ruoho", "Andrew Chipper", "Aaron Dreschner",
+        }
+        out = []
+        for name in speakers:
+            if name in known_female:
+                g = "female"
+            elif name in known_male:
+                g = "male"
+            else:
+                g = "unknown"
+            out.append({"name": name, "gender": g})
+        return out
 
     def _check_importable(self):
         import TTS.api  # noqa: F401
@@ -199,15 +245,22 @@ class _XTTSEngine(_Engine):
         ref_text: Optional[str] = None,
         speed: float = 1.0,
         language: str = "en",
+        speaker_name: Optional[str] = None,
     ) -> SynthesisResult:
         self._load()
-        # XTTS accepts speaker_wav (path or list), language, and returns float32 numpy.
-        wav = self._model.tts(  # type: ignore[union-attr]
-            text=text,
-            speaker_wav=ref_audio_path,
-            language=language,
-            speed=speed,
-        )
+        # Prefer a named built-in speaker when given — that way we get
+        # actual different voices (male/female, etc.) instead of the same
+        # cloned reference every time. Falls back to ref clip cloning.
+        kwargs = {
+            "text": text,
+            "language": language,
+            "speed": speed,
+        }
+        if speaker_name:
+            kwargs["speaker"] = speaker_name
+        else:
+            kwargs["speaker_wav"] = ref_audio_path
+        wav = self._model.tts(**kwargs)  # type: ignore[union-attr]
         wav_np = np.asarray(wav, dtype=np.float32)
         if wav_np.ndim > 1:
             wav_np = wav_np.mean(axis=-1)

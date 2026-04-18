@@ -37,6 +37,10 @@ type Props = {
   /** When true (e.g. right after a preview finishes generating), adds a
    *  pulsing warm glow around the sphere to signal "click to listen". */
   ready?: boolean;
+  /** Optional explicit 4-color palette [warmA, warmB, highlight, cool].
+   *  Overrides the seed-derived palette — used by the Design tab so the
+   *  sphere's colors reflect live slider positions. */
+  colors?: [string, string, string, string];
   withPlayIcon?: boolean;
   className?: string;
   onClick?: () => void;
@@ -142,43 +146,32 @@ void main() {
     return;
   }
 
-  // Flow speed: 3x idle so the ambient orb visibly roils. Speaking roughly
-  // doubles the pace on top of that.
-  float t = uTime * (1.35 + 0.90 * uSpeaking) + uSeed;
+  // Flow speed — idle only. Speaking does NOT speed up the base flow;
+  // instead it overlays a traveling ring (see below). This matches how
+  // ElevenLabs' shader separates the always-on "uTime * timeScale" motion
+  // from the audio-reactive splat.
+  float t = uTime * 1.35 + uSeed;
 
-  // Displacement amplitude: idle is healthy motion; speaking pushes harder
-  // so the shape visibly deforms — that's the "disruption."
-  float amp = mix(0.50, 0.95, uSpeaking);
+  // Displacement amplitude for the domain-warping — constant. Speaking
+  // used to ramp this up, which read as "zoom/pulse" distortion. Gone now.
+  float amp = 0.55;
 
-  // Circular disruption during speaking: a traveling radial wave added to
-  // UV before the flow field lookup. This is how the ElevenLabs shader
-  // visualizes audio — the colors ripple outward from the center instead
-  // of drifting past like a scrolling picture.
-  vec2 warpUv = uv;
-  if (uSpeaking > 0.02) {
-    vec2 radial = uv / max(r, 0.0001);
-    float wave1 = sin(r * 6.5 - uTime * 2.2) * 0.10;
-    float wave2 = sin(r * 10.5 - uTime * 2.9 + 1.1) * 0.06;
-    warpUv += radial * (wave1 + wave2) * uSpeaking;
-  }
-
-  // Domain warping with ORBITAL offsets. Using vec2(cos, sin)*t instead of
-  // vec2(0, t) means the noise origin swirls around rather than sliding in
-  // one direction — prevents the "scrolling up" look.
+  // Domain warping with ORBITAL offsets. Noise origin swirls around rather
+  // than translating in one direction — prevents the "scrolling up" look.
   vec2 offA = vec2(cos(t * 0.22), sin(t * 0.22)) * 0.85;
   vec2 offB = vec2(cos(t * 0.17 + 2.1), sin(t * 0.17 + 2.1)) * 0.75;
   vec2 offC = vec2(cos(t * 0.19 + 4.3), sin(t * 0.19 + 4.3)) * 0.70;
   vec2 offD = vec2(cos(t * 0.24 + 5.7), sin(t * 0.24 + 5.7)) * 0.80;
 
   vec2 q = vec2(
-    fbm(warpUv * 1.3 + offA),
-    fbm(warpUv * 1.3 + offB)
+    fbm(uv * 1.3 + offA),
+    fbm(uv * 1.3 + offB)
   );
   vec2 s = vec2(
-    fbm(warpUv * 1.3 + q * 1.8 + offC),
-    fbm(warpUv * 1.3 + q * 1.8 + offD)
+    fbm(uv * 1.3 + q * 1.8 + offC),
+    fbm(uv * 1.3 + q * 1.8 + offD)
   );
-  float n = fbm(warpUv * 1.3 + s * amp);
+  float n = fbm(uv * 1.3 + s * amp);
 
   // Four-way color mix. q.x, s.y, n each drive a different blend, so the
   // result is never just linear between two colors — you get the mottled,
@@ -203,8 +196,24 @@ void main() {
   float grain = (hash(vUv * 920.0 + t * 0.1) - 0.5) * 0.035;
   color += grain;
 
-  // (Disruption ring removed — speaking shows through via the amplitude
-  // + speed boost above alone.)
+  // ------- Speaking state: additive traveling ring (ElevenLabs splat) -------
+  // Ported almost directly from their splat fragment shader:
+  //   pTime = time * .25 + cumulativeAudio * .15
+  //   pDist = mod(dist * 2 - pTime, 1)
+  //   pulse = smoothstep(0, width, pDist) - smoothstep(width, width*2, pDist)
+  //   splat = pulse * intensity * distClamp * color
+  // No UV displacement, no scaling, no speed-up — just color ADDITION.
+  if (uSpeaking > 0.02) {
+    float pTime = uTime * 0.45;
+    float pDist = mod(r * 2.0 - pTime, 1.0);
+    float width = 0.20;
+    float pulse = smoothstep(0.0, width, pDist) - smoothstep(width, width * 2.0, pDist);
+    // Fade toward the rim so the ring doesn't smear past the edge mask.
+    pulse *= clamp(1.2 - r * 1.1, 0.0, 1.0);
+    // Bright neutral ring with a slight warm tint pulled from the palette.
+    vec3 ringColor = mix(vec3(1.0), uColor2, 0.35);
+    color += ringColor * pulse * uSpeaking * 0.55;
+  }
 
   // Circular alpha with 1px smooth edge.
   float aa = fwidth(r) * 0.9;
@@ -251,6 +260,7 @@ export function VoiceSphere({
   size = 160,
   speaking = false,
   ready = false,
+  colors,
   withPlayIcon = false,
   className = "",
   onClick,
@@ -259,8 +269,14 @@ export function VoiceSphere({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const speakingRef = useRef(speaking);
   speakingRef.current = speaking;
+  // Live ref so color updates don't force a full WebGL re-init when the
+  // Design tab user moves a slider — we just push new uniform values.
+  const colorsRef = useRef(colors);
+  colorsRef.current = colors;
 
   // Stable per-seed numeric seed (becomes a uniform) + picked palette.
+  // If `colors` is provided, it overrides the palette at render time but
+  // we still compute a fallback palette from the seed for the initial frame.
   const { palette, numericSeed } = useMemo(() => {
     const h = hashSeed(seed);
     return { palette: PALETTES[h % PALETTES.length], numericSeed: (h & 0xffff) / 0xffff * 100 };
@@ -317,10 +333,12 @@ export function VoiceSphere({
     const uC3 = gl.getUniformLocation(program, "uColor3");
 
     gl.useProgram(program);
-    gl.uniform3fv(uC0, hexToRgb01(palette[0]));
-    gl.uniform3fv(uC1, hexToRgb01(palette[1]));
-    gl.uniform3fv(uC2, hexToRgb01(palette[2]));
-    gl.uniform3fv(uC3, hexToRgb01(palette[3]));
+    // Initial palette — overridden per-frame from colorsRef if set.
+    const initial = colorsRef.current ?? palette;
+    gl.uniform3fv(uC0, hexToRgb01(initial[0]));
+    gl.uniform3fv(uC1, hexToRgb01(initial[1]));
+    gl.uniform3fv(uC2, hexToRgb01(initial[2]));
+    gl.uniform3fv(uC3, hexToRgb01(initial[3]));
     gl.uniform1f(uSeed, numericSeed);
 
     gl.clearColor(0, 0, 0, 0);
@@ -343,6 +361,14 @@ export function VoiceSphere({
       gl.useProgram(program);
       gl.uniform1f(uTime, tSec);
       gl.uniform1f(uSpeaking, speakingLerp);
+      // Push latest slider-driven colors if the Design tab updated them.
+      const live = colorsRef.current;
+      if (live) {
+        gl.uniform3fv(uC0, hexToRgb01(live[0]));
+        gl.uniform3fv(uC1, hexToRgb01(live[1]));
+        gl.uniform3fv(uC2, hexToRgb01(live[2]));
+        gl.uniform3fv(uC3, hexToRgb01(live[3]));
+      }
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       rafId = requestAnimationFrame(frame);
