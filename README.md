@@ -6,8 +6,10 @@ Runs on your Mac (tested on Apple Silicon M2). Does the heavy ML locally so the 
 
 ## What it does
 
-- **Clone a voice** from a 5-30 second audio sample using [F5-TTS](https://github.com/SWivid/F5-TTS) (Apache 2.0, zero-shot).
-- **Design a voice** from presets + pitch/speed/temperature sliders.
+- **Clone a voice** from a 5-30 second audio sample. Pick the engine per voice:
+  - **XTTS-v2** (Coqui, CPML non-commercial, 17 languages) — default
+  - **F5-TTS** (Apache 2.0, English + Chinese, 2024)
+- **Design a voice** from presets + pitch/speed/temperature sliders, on either engine.
 - Saves profiles locally under `backend/data/profiles/<id>/`.
 - Uploads profile metadata + a preview MP3 to your Reader server so it shows up in the Voice Lab tab.
 
@@ -69,5 +71,7 @@ Open <http://localhost:3007>.
 
 ## Licensing notes
 
-- **F5-TTS**: Apache 2.0.
-- XTTS-v2 is intentionally NOT used — its Coqui Public Model License is non-commercial. If you want to experiment with it locally, `backend/tts.py` has a commented-out adapter.
+- **F5-TTS**: Apache 2.0 — use freely.
+- **XTTS-v2**: Coqui Public Model License — **non-commercial use only**. Fine for personal projects like this one. If you ever want to build a commercial product on top of Voice Studio, switch the default engine to F5 in `.env.local` (`TTS_ENGINE_DEFAULT=f5`) and don't expose XTTS in the picker.
+
+The first call to XTTS downloads ~1.8 GB of weights. First call to F5 downloads ~1.3 GB. After that, each engine stays in RAM until the backend restarts — having both loaded uses ~3 GB.

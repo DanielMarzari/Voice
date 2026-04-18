@@ -25,12 +25,23 @@ export type Preset = {
   ref_text: string;
 };
 
+export type Engine = {
+  id: string;
+  label: string;
+  license: string;
+  languages: string[];
+  loaded: boolean;
+  available: boolean;
+  device: string;
+};
+
 export type Health = {
   ok: boolean;
   reader_configured: boolean;
   reader_base_url: string | null;
   device: string;
-  engine: string;
+  default_engine: string;
+  engines: Engine[];
 };
 
 async function j<T>(r: Response): Promise<T> {
@@ -48,6 +59,10 @@ export async function getHealth(): Promise<Health> {
 export async function listPresets(): Promise<Preset[]> {
   const d = await j<{ presets: Preset[] }>(await fetch("/api/presets"));
   return d.presets;
+}
+
+export async function listEngines(): Promise<{ default: string; engines: Engine[] }> {
+  return j(await fetch("/api/engines"));
 }
 
 export async function listProfiles(): Promise<Profile[]> {
@@ -70,6 +85,8 @@ export function sampleUrl(id: string): string {
 export async function cloneVoice(args: {
   name: string;
   file: File;
+  engine: string;
+  language?: string;
   previewText?: string;
   refText?: string;
   upload?: boolean;
@@ -77,6 +94,8 @@ export async function cloneVoice(args: {
   const fd = new FormData();
   fd.append("name", args.name);
   fd.append("audio_file", args.file);
+  fd.append("engine_id", args.engine);
+  fd.append("language", args.language ?? "en");
   if (args.previewText) fd.append("preview_text", args.previewText);
   if (args.refText) fd.append("ref_text", args.refText);
   fd.append("upload", String(args.upload !== false));
@@ -86,6 +105,8 @@ export async function cloneVoice(args: {
 export async function designVoice(args: {
   name: string;
   baseVoice: string;
+  engine: string;
+  language?: string;
   pitch: number;
   speed: number;
   temperature: number;
@@ -100,6 +121,8 @@ export async function designVoice(args: {
       body: JSON.stringify({
         name: args.name,
         base_voice: args.baseVoice,
+        engine: args.engine,
+        language: args.language ?? "en",
         pitch: args.pitch,
         speed: args.speed,
         temperature: args.temperature,

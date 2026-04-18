@@ -1,6 +1,5 @@
 # Voice Studio backend deps.
 # Install: python3.11 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
-# (F5-TTS pulls torch, torchaudio, numpy, etc. transitively.)
 
 fastapi>=0.115
 uvicorn[standard]>=0.30
@@ -13,7 +12,17 @@ pydantic>=2.7
 soundfile>=0.12
 pydub>=0.25
 numpy>=1.26,<2.0
+scipy>=1.11  # used for pitch_shift in tts.py
 
-# TTS — F5-TTS (Apache 2.0). This brings torch + torchaudio on install.
-# On Apple Silicon: torch builds automatically use MPS when device='mps'.
+# ---- TTS engines ----
+# Both engines are optional at runtime — if one fails to import, only the
+# other is offered in the engine picker. Install both by default.
+
+# F5-TTS (Apache 2.0, EN + ZH).
 f5-tts>=0.3
+
+# Coqui TTS, for XTTS-v2 (CPML non-commercial, 17 languages).
+# Set COQUI_TOS_AGREED=1 in your env to accept their license on model download
+# (tts.py does this automatically). The package is heavy (~500 MB of deps incl.
+# torchaudio, librosa, numba).
+TTS>=0.22

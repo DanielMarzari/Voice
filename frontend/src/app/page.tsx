@@ -84,17 +84,33 @@ function HealthPill({ health }: { health: Health | null }) {
   if (!health) {
     return <span className="chip">⚠ Backend offline</span>;
   }
-  if (!health.reader_configured) {
-    return (
-      <span className="chip" title="Set READER_BASE_URL + READER_AUTH_TOKEN in .env.local">
-        ⚠ Reader not configured
-      </span>
-    );
-  }
+  const available = health.engines.filter((e) => e.available);
+  const loaded = health.engines.filter((e) => e.loaded);
+  const chipText =
+    loaded.length > 0
+      ? `● ${loaded.map((e) => e.id).join(", ")} on ${health.device}`
+      : `${available.length}/${health.engines.length} engines available`;
+  const tooltip = [
+    health.reader_base_url ?? "Reader not connected",
+    `Engines: ${health.engines
+      .map((e) => `${e.id}${e.available ? "" : " (missing)"}${e.loaded ? " [loaded]" : ""}`)
+      .join(", ")}`,
+  ].join(" · ");
+
   return (
-    <span className="chip" title={health.reader_base_url ?? ""}>
-      ● {health.engine} on {health.device}
-    </span>
+    <div className="flex items-center gap-2">
+      {!health.reader_configured && (
+        <span
+          className="chip"
+          title="Set READER_BASE_URL + READER_AUTH_TOKEN in .env.local"
+        >
+          ⚠ Reader not configured
+        </span>
+      )}
+      <span className="chip" title={tooltip}>
+        {chipText}
+      </span>
+    </div>
   );
 }
 
@@ -105,8 +121,8 @@ function SphereLogo() {
       className="voice-sphere voice-sphere-static"
       style={
         {
-          width: 32,
-          height: 32,
+          width: "32px",
+          height: "32px",
           "--c1": "#f6b4a6",
           "--c2": "#d58cff",
           "--c3": "#6190ff",

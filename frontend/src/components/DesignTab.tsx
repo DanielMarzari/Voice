@@ -1,7 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { designVoice, listPresets, type Preset, type Profile } from "@/lib/api";
+import {
+  designVoice,
+  listEngines,
+  listPresets,
+  type Engine,
+  type Preset,
+  type Profile,
+} from "@/lib/api";
+import { EnginePicker, useEngineChoice } from "@/components/EnginePicker";
 import { VoiceSphere } from "@/components/VoiceSphere";
 
 type Props = {
@@ -28,6 +36,11 @@ export function DesignTab({ onCreated }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Profile | null>(null);
 
+  const [engines, setEngines] = useState<Engine[] | null>(null);
+  const [backendDefault, setBackendDefault] = useState<string | null>(null);
+  const [engine, setEngine] = useEngineChoice(engines, backendDefault);
+  const [language, setLanguage] = useState("en");
+
   useEffect(() => {
     listPresets()
       .then((ps) => {
@@ -35,14 +48,29 @@ export function DesignTab({ onCreated }: Props) {
         if (ps.length && !baseVoice) setBaseVoice(ps[0].id);
       })
       .catch((e) => setError((e as Error).message));
+    listEngines()
+      .then((d) => {
+        setEngines(d.engines);
+        setBackendDefault(d.default);
+      })
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Keep language valid for the chosen engine.
+  useEffect(() => {
+    if (!engines || !engine) return;
+    const e = engines.find((x) => x.id === engine);
+    if (e && !e.languages.includes(language)) {
+      setLanguage(e.languages[0] ?? "en");
+    }
+  }, [engine, engines, language]);
 
   const update = <K extends keyof Sliders>(key: K, val: Sliders[K]) =>
     setSliders((s) => ({ ...s, [key]: val }));
 
   const onSubmit = useCallback(async () => {
-    if (!name.trim() || !baseVoice || busy) return;
+    if (!name.trim() || !baseVoice || !engine || busy) return;
     setBusy(true);
     setError(null);
     setResult(null);
@@ -50,6 +78,8 @@ export function DesignTab({ onCreated }: Props) {
       const p = await designVoice({
         name: name.trim(),
         baseVoice,
+        engine,
+        language,
         pitch: sliders.pitch,
         speed: sliders.speed,
         temperature: sliders.temperature,
@@ -62,11 +92,11 @@ export function DesignTab({ onCreated }: Props) {
     } finally {
       setBusy(false);
     }
-  }, [name, baseVoice, sliders, previewText, busy, onCreated]);
+  }, [name, baseVoice, engine, language, sliders, previewText, busy, onCreated]);
 
   // Seed for preview sphere — changes as knobs move so user gets visual
   // feedback before hitting synthesize.
-  const previewSeed = `${baseVoice}:${sliders.pitch.toFixed(1)}:${sliders.speed.toFixed(2)}:${sliders.temperature.toFixed(2)}`;
+  const previewSeed = `${engine}:${baseVoice}:${sliders.pitch.toFixed(1)}:${sliders.speed.toFixed(2)}:${sliders.temperature.toFixed(2)}`;
 
   return (
     <div className="grid md:grid-cols-[1fr_320px] gap-8 items-start">
@@ -81,6 +111,17 @@ export function DesignTab({ onCreated }: Props) {
             maxLength={60}
           />
         </div>
+
+        {engines && engine && (
+          <EnginePicker
+            engines={engines}
+            value={engine}
+            onChange={setEngine}
+            includeLanguage
+            language={language}
+            onLanguageChange={setLanguage}
+          />
+        )}
 
         <div>
           <label className="block text-sm font-medium mb-1.5">Base voice</label>

@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
-import { cloneVoice, type Profile } from "@/lib/api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { cloneVoice, listEngines, type Engine, type Profile } from "@/lib/api";
+import { EnginePicker, useEngineChoice } from "@/components/EnginePicker";
 import { VoiceSphere } from "@/components/VoiceSphere";
 
 type Props = {
@@ -21,6 +22,29 @@ export function CloneTab({ onCreated }: Props) {
   const [result, setResult] = useState<Profile | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const [engines, setEngines] = useState<Engine[] | null>(null);
+  const [backendDefault, setBackendDefault] = useState<string | null>(null);
+  const [engine, setEngine] = useEngineChoice(engines, backendDefault);
+  const [language, setLanguage] = useState("en");
+
+  useEffect(() => {
+    listEngines()
+      .then((d) => {
+        setEngines(d.engines);
+        setBackendDefault(d.default);
+      })
+      .catch((e) => setError((e as Error).message));
+  }, []);
+
+  // Reset language if the chosen engine doesn't support it.
+  useEffect(() => {
+    if (!engines || !engine) return;
+    const e = engines.find((x) => x.id === engine);
+    if (e && !e.languages.includes(language)) {
+      setLanguage(e.languages[0] ?? "en");
+    }
+  }, [engine, engines, language]);
+
   const onDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setDragging(false);
@@ -29,7 +53,7 @@ export function CloneTab({ onCreated }: Props) {
   }, []);
 
   const onSubmit = useCallback(async () => {
-    if (!file || !name.trim() || busy) return;
+    if (!file || !name.trim() || !engine || busy) return;
     setBusy(true);
     setError(null);
     setResult(null);
@@ -37,6 +61,8 @@ export function CloneTab({ onCreated }: Props) {
       const p = await cloneVoice({
         name: name.trim(),
         file,
+        engine,
+        language,
         previewText: previewText.trim() || undefined,
         refText: refText.trim() || undefined,
       });
@@ -47,7 +73,7 @@ export function CloneTab({ onCreated }: Props) {
     } finally {
       setBusy(false);
     }
-  }, [file, name, previewText, refText, busy, onCreated]);
+  }, [file, name, engine, language, previewText, refText, busy, onCreated]);
 
   return (
     <div className="grid md:grid-cols-[1fr_320px] gap-8 items-start">
@@ -62,6 +88,17 @@ export function CloneTab({ onCreated }: Props) {
             maxLength={60}
           />
         </div>
+
+        {engines && engine && (
+          <EnginePicker
+            engines={engines}
+            value={engine}
+            onChange={setEngine}
+            includeLanguage
+            language={language}
+            onLanguageChange={setLanguage}
+          />
+        )}
 
         <div>
           <label className="block text-sm font-medium mb-1.5">
