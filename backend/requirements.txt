@@ -26,3 +26,10 @@ f5-tts>=0.3
 # (tts.py does this automatically). The package is heavy (~500 MB of deps incl.
 # torchaudio, librosa, numba).
 TTS>=0.22
+
+# Pin transformers to a version that still exposes BeamSearchScorer.
+# Coqui TTS (now unmaintained) imports BeamSearchScorer from transformers,
+# which was removed in transformers 4.44+. Without this pin the XTTS engine
+# fails at import time with `ImportError: cannot import name 'BeamSearchScorer'`.
+# 4.36.2 is the last line that stayed fully compatible with TTS 0.22.x.
+transformers==4.36.2

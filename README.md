@@ -75,6 +75,14 @@ Open <http://localhost:3007>.
 
 **Backend crashes or gives a 500 partway through synthesis on Apple Silicon** — PyTorch's MPS backend has occasional bugs in STFT / istft paths (you'll see warnings like `An output with one or more elements was resized since it had shape []`). If you hit this, set `TTS_DEVICE=cpu` in `.env.local` and restart. Synthesis will be ~2× slower but 100% stable. XTTS falls back to CPU automatically if MPS `.to()` errors; F5-TTS does not, so the env var is the knob.
 
+**`ImportError: cannot import name 'BeamSearchScorer' from 'transformers'`** — transformers 4.44+ removed the class that Coqui TTS imports. Pin the old version:
+```bash
+cd backend
+source .venv/bin/activate
+pip install "transformers==4.36.2" --force-reinstall
+```
+Then restart the backend. `requirements.txt` already pins this for fresh installs; `--force-reinstall` is the fix for venvs created before the pin landed.
+
 **`Preset … is missing`** — shouldn't happen anymore; presets share a single reference clip that auto-downloads on first use. If the download can't reach GitHub, drop any ~5s clean-speech WAV at `backend/data/presets/base.wav` as a manual override.
 
 ## Licensing notes

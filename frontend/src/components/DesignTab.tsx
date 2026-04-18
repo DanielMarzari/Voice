@@ -18,8 +18,10 @@ import {
 } from "@/lib/api";
 import { EnginePicker, useEngineChoice } from "@/components/EnginePicker";
 import { GenerationProgress } from "@/components/GenerationProgress";
+import { MoodPicker } from "@/components/MoodPicker";
+import { SessionHistory, type SessionItem } from "@/components/SessionHistory";
 import { VoiceSphere } from "@/components/VoiceSphere";
-import { MOODS, moodPalette } from "@/lib/moodPalettes";
+import { MOODS, moodPalette, type Palette } from "@/lib/moodPalettes";
 
 type Props = {
   onCreated: (p: Profile) => void;
@@ -52,11 +54,21 @@ export function DesignTab({ onCreated }: Props) {
   const [moodId, setMoodId] = useState<string>(MOODS[0].id);
   const [paletteSeed, setPaletteSeed] = useState<number>(() => Math.random());
 
+  // In-memory list of previews generated during this tab session. Lets the
+  // user A/B between unsaved generations without re-synthesizing. Cleared
+  // on tab unmount / page reload (intentionally throwaway).
+  const [sessionItems, setSessionItems] = useState<SessionItem[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+
+  // Clean up all blob URLs when the tab unmounts. previewUrl aliases one
+  // of the sessionItems' urls during its lifetime, so we revoke the
+  // session list exhaustively on unmount — covers both.
   useEffect(() => {
     return () => {
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      sessionItems.forEach((it) => URL.revokeObjectURL(it.blobUrl));
     };
-  }, [previewUrl]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [engines, setEngines] = useState<Engine[] | null>(null);
   const [backendDefault, setBackendDefault] = useState<string | null>(null);
@@ -163,10 +175,6 @@ export function DesignTab({ onCreated }: Props) {
     if (!baseVoice || !engine || busy) return;
     setBusy("preview");
     setError(null);
-    if (previewUrl) {
-      URL.revokeObjectURL(previewUrl);
-      setPreviewUrl(null);
-    }
     try {
       const url = await previewDesign({
         baseVoice,
@@ -178,13 +186,42 @@ export function DesignTab({ onCreated }: Props) {
         speakerName: engine === "xtts" ? speakerName : null,
         previewText: previewText.trim() || undefined,
       });
+      // Build a short, readable caption for the session list.
+      const baseLabel = baseVoice.startsWith("user:")
+        ? baseVoice.slice(5)
+        : baseVoice;
+      const voiceLabel =
+        engine === "xtts" && speakerName ? speakerName.split(" ")[0] : baseLabel;
+      const newItem: SessionItem = {
+        id: `sess-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        blobUrl: url,
+        colors: livePalette as Palette,
+        label: `${voiceLabel} · p${sliders.pitch.toFixed(1)} s${sliders.speed.toFixed(2)}`,
+        createdAt: Date.now(),
+      };
+      setSessionItems((xs) => [newItem, ...xs].slice(0, 12));
+      setActiveSessionId(newItem.id);
       setPreviewUrl(url);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setBusy(null);
     }
-  }, [baseVoice, engine, language, sliders, previewText, speakerName, busy, previewUrl]);
+  }, [baseVoice, engine, language, sliders, previewText, speakerName, livePalette, busy]);
+
+  const selectSessionItem = useCallback((item: SessionItem) => {
+    setActiveSessionId(item.id);
+    setPreviewUrl(item.blobUrl);
+    // Update the palette so the sphere matches that preview's look.
+    // (We don't restore the moodId — these are transient comparisons.)
+  }, []);
+
+  const clearSession = useCallback(() => {
+    sessionItems.forEach((it) => URL.revokeObjectURL(it.blobUrl));
+    setSessionItems([]);
+    setActiveSessionId(null);
+    setPreviewUrl(null);
+  }, [sessionItems]);
 
   const onSave = useCallback(async () => {
     if (!name.trim() || !baseVoice || !engine || busy) return;
@@ -395,55 +432,6 @@ export function DesignTab({ onCreated }: Props) {
           hint="Higher = more expressive, more variance"
         />
 
-        {/* Color mood — independent of pitch/speed/temp now. Dropdown
-            picks the emotional register; Regenerate reshuffles within it. */}
-        <div>
-          <label className="block text-sm font-medium mb-1.5">
-            Color mood
-            <span className="ml-2 text-xs text-[color:var(--muted)] font-normal">
-              sets the sphere palette
-            </span>
-          </label>
-          <div className="flex gap-2">
-            <select
-              className="select flex-1"
-              value={moodId}
-              onChange={(e) => {
-                setMoodId(e.target.value);
-                setPaletteSeed(Math.random());
-              }}
-            >
-              {MOODS.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className="btn"
-              onClick={() => setPaletteSeed(Math.random())}
-              title="Reshuffle colors within this mood"
-            >
-              ⟳ Regenerate
-            </button>
-          </div>
-          {/* Tiny color-chip preview — 4 dots matching the current palette */}
-          <div className="flex gap-1.5 mt-2">
-            {livePalette.map((c, i) => (
-              <span
-                key={i}
-                className="inline-block w-4 h-4 rounded-full border border-[color:var(--border)]"
-                style={{ background: c }}
-                aria-hidden
-              />
-            ))}
-            <span className="text-xs text-[color:var(--muted)] ml-2 self-center">
-              {MOODS.find((m) => m.id === moodId)?.description}
-            </span>
-          </div>
-        </div>
-
         <div>
           <label className="block text-sm font-medium mb-1.5">Preview text</label>
           <textarea
@@ -481,36 +469,22 @@ export function DesignTab({ onCreated }: Props) {
         </div>
 
         {busy && <GenerationProgress kind={busy} estimateSeconds={12} />}
-
-        {previewUrl && !result && (
-          <div className="card mt-3">
-            <div className="text-xs text-[color:var(--muted)] mb-2">
-              Preview (not saved)
-            </div>
-            <audio
-              controls
-              autoPlay
-              className="w-full"
-              src={previewUrl}
-              onPlay={() => setAudioPlaying(true)}
-              onPause={() => setAudioPlaying(false)}
-              onEnded={() => setAudioPlaying(false)}
-            />
-            <div className="text-xs text-[color:var(--muted)] mt-2">
-              Sound good? Name it above and hit <strong>Save voice</strong>.
-            </div>
-          </div>
-        )}
       </div>
 
+      {/* Right column: sphere + mood picker + session history */}
       <div className="flex flex-col items-center">
         <VoiceSphere
-          seed={result?.id ?? previewSeed}
+          seed={activeSessionId ?? result?.id ?? previewSeed}
           size={220}
           speaking={audioPlaying}
           ready={(!!previewUrl || !!result) && !audioPlaying}
-          colors={livePalette}
+          colors={
+            (sessionItems.find((s) => s.id === activeSessionId)?.colors as
+              | Palette
+              | undefined) ?? livePalette
+          }
         />
+
         {result ? (
           <div className="mt-5 w-full space-y-3">
             <div className="text-center">
@@ -528,12 +502,43 @@ export function DesignTab({ onCreated }: Props) {
               onEnded={() => setAudioPlaying(false)}
             />
           </div>
-        ) : (
-          <div className="mt-5 text-center text-xs text-[color:var(--muted)] max-w-xs">
-            Palette updates live as you move the sliders. Hit <em>Create voice</em>{" "}
-            to synthesize a preview.
-          </div>
-        )}
+        ) : previewUrl ? (
+          // Active session preview — hidden controls auto-play, user can
+          // still drag the scrubber. Distinct from the saved audio above.
+          <audio
+            controls
+            autoPlay
+            className="w-full mt-4"
+            src={previewUrl}
+            onPlay={() => setAudioPlaying(true)}
+            onPause={() => setAudioPlaying(false)}
+            onEnded={() => setAudioPlaying(false)}
+          />
+        ) : null}
+
+        {/* Color mood moved here per user request — directly under the orb. */}
+        <div className="mt-5 w-full max-w-[260px]">
+          <MoodPicker
+            moodId={moodId}
+            onMoodChange={(id) => {
+              setMoodId(id);
+              setPaletteSeed(Math.random());
+            }}
+            onRegenerate={() => setPaletteSeed(Math.random())}
+            palette={livePalette}
+            compact
+          />
+        </div>
+
+        {/* Session history: throwaway previews to A/B between. */}
+        <div className="w-full">
+          <SessionHistory
+            items={sessionItems}
+            activeId={activeSessionId}
+            onSelect={selectSessionItem}
+            onClear={sessionItems.length > 0 ? clearSession : undefined}
+          />
+        </div>
       </div>
     </div>
   );

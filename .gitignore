@@ -25,6 +25,9 @@ next-env.d.ts
 **/data/profiles/
 **/data/cache/
 **/data/models/
+# User-uploaded reference clips — never commit; they're personal voice
+# samples the user dropped in via the Design tab's Upload button.
+**/data/presets/user/
 # Also catch the misnested dir pattern outright.
 backend/backend/
 

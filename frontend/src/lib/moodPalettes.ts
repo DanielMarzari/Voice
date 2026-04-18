@@ -108,6 +108,55 @@ export const MOODS: Mood[] = [
       ["#ffac1c", "#a5d94a", "#fce98a", "#0d8888"],
     ],
   },
+  {
+    id: "planetary",
+    label: "Planetary",
+    description: "Jupiter's bands, Saturn's gold, Mars rust, Neptune deep blue.",
+    variants: [
+      // Jupiter-leaning: cream bands, rust red spot, warm brown
+      ["#d89964", "#f2d7a3", "#e04f3f", "#6b3e2a"],
+      // Saturn-leaning: gold, pale beige, soft amber, dusk blue
+      ["#e8b85e", "#f5e3b8", "#c88a3f", "#2d3c5e"],
+      // Mars: rust, orange dust, cream highlight, deep maroon
+      ["#b84a2a", "#e07a3f", "#f7d8a8", "#4a1a18"],
+      // Neptune + Jupiter mix: deep blue, ice white, cloud band, storm red
+      ["#2d4080", "#c8d4f0", "#d89964", "#c33a30"],
+    ],
+  },
+  {
+    id: "storm",
+    label: "Storm",
+    description: "Slate grey, thunder purple, lightning white, hot pink.",
+    variants: [
+      ["#3a3a42", "#6a4ea8", "#f5f3f0", "#ff3d88"],
+      ["#2a2a33", "#7a5fb8", "#ffffff", "#ff478b"],
+      ["#4a4852", "#5a3d9c", "#f0eef0", "#ff56a0"],
+      // High-contrast "lightning striking" palette
+      ["#1a1a22", "#8b61d8", "#ffe066", "#ff2d7a"],
+    ],
+  },
+  {
+    id: "aurora",
+    label: "Aurora",
+    description: "Northern lights — jade green, magenta, indigo, ice white.",
+    variants: [
+      ["#2effa8", "#ff5ebe", "#4a3fff", "#e6f5ff"],
+      ["#3affc2", "#d44ad8", "#5a4fff", "#d0e8ff"],
+      ["#48e9b5", "#ff7ad9", "#3e3be8", "#eaf5ff"],
+      ["#55ffb0", "#c646d0", "#6860ff", "#f0f8ff"],
+    ],
+  },
+  {
+    id: "reef",
+    label: "Coral Reef",
+    description: "Tropical blues, soft coral, neon yellow, sea foam.",
+    variants: [
+      ["#ff7a63", "#ffe066", "#4dd5c2", "#0b7a8c"],
+      ["#ff8a72", "#ffd85a", "#5ae0c8", "#046582"],
+      ["#ff9978", "#ffec75", "#6adbcb", "#0a6a83"],
+      ["#ff6f5a", "#ffda52", "#45c9b4", "#0f6676"],
+    ],
+  },
 ];
 
 export function moodById(id: string): Mood | undefined {

@@ -11,6 +11,7 @@ import {
 } from "@/lib/api";
 import { EnginePicker, useEngineChoice } from "@/components/EnginePicker";
 import { GenerationProgress } from "@/components/GenerationProgress";
+import { SessionHistory, type SessionItem } from "@/components/SessionHistory";
 import { VoiceSphere } from "@/components/VoiceSphere";
 
 type Props = {
@@ -30,14 +31,19 @@ export function CloneTab({ onCreated }: Props) {
   const [result, setResult] = useState<Profile | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [audioPlaying, setAudioPlaying] = useState(false);
+  const [sessionItems, setSessionItems] = useState<SessionItem[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Clean up object URLs to avoid leaking blob memory.
+  // Clean up all blob URLs when the tab unmounts. previewUrl aliases one
+  // of the session items during its lifetime, so revoking the list here
+  // covers both cases.
   useEffect(() => {
     return () => {
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      sessionItems.forEach((it) => URL.revokeObjectURL(it.blobUrl));
     };
-  }, [previewUrl]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [engines, setEngines] = useState<Engine[] | null>(null);
   const [backendDefault, setBackendDefault] = useState<string | null>(null);
@@ -73,11 +79,6 @@ export function CloneTab({ onCreated }: Props) {
     if (!file || !engine || busy) return;
     setBusy("preview");
     setError(null);
-    // Release any prior preview blob before replacing.
-    if (previewUrl) {
-      URL.revokeObjectURL(previewUrl);
-      setPreviewUrl(null);
-    }
     try {
       const url = await previewClone({
         file,
@@ -86,13 +87,35 @@ export function CloneTab({ onCreated }: Props) {
         previewText: previewText.trim() || undefined,
         refText: refText.trim() || undefined,
       });
+      const label = `${name || file.name.replace(/\.[^.]+$/, "")} · ${engine}`;
+      const newItem: SessionItem = {
+        id: `sess-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        blobUrl: url,
+        colors: null, // clone uses seed-derived palette
+        label,
+        createdAt: Date.now(),
+      };
+      setSessionItems((xs) => [newItem, ...xs].slice(0, 12));
+      setActiveSessionId(newItem.id);
       setPreviewUrl(url);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setBusy(null);
     }
-  }, [file, engine, language, previewText, refText, busy, previewUrl]);
+  }, [file, name, engine, language, previewText, refText, busy]);
+
+  const selectSessionItem = useCallback((item: SessionItem) => {
+    setActiveSessionId(item.id);
+    setPreviewUrl(item.blobUrl);
+  }, []);
+
+  const clearSession = useCallback(() => {
+    sessionItems.forEach((it) => URL.revokeObjectURL(it.blobUrl));
+    setSessionItems([]);
+    setActiveSessionId(null);
+    setPreviewUrl(null);
+  }, [sessionItems]);
 
   const onSave = useCallback(async () => {
     if (!file || !name.trim() || !engine || busy) return;
@@ -240,31 +263,11 @@ export function CloneTab({ onCreated }: Props) {
         </div>
 
         {busy && <GenerationProgress kind={busy} estimateSeconds={12} />}
-
-        {previewUrl && !result && (
-          <div className="card mt-3">
-            <div className="text-xs text-[color:var(--muted)] mb-2">
-              Preview (not saved)
-            </div>
-            <audio
-              controls
-              autoPlay
-              className="w-full"
-              src={previewUrl}
-              onPlay={() => setAudioPlaying(true)}
-              onPause={() => setAudioPlaying(false)}
-              onEnded={() => setAudioPlaying(false)}
-            />
-            <div className="text-xs text-[color:var(--muted)] mt-2">
-              Sound good? Give it a name above and hit <strong>Save voice</strong>.
-            </div>
-          </div>
-        )}
       </div>
 
       <div className="flex flex-col items-center">
         <VoiceSphere
-          seed={result?.id ?? name ?? "preview"}
+          seed={activeSessionId ?? result?.id ?? name ?? "preview"}
           size={220}
           speaking={audioPlaying}
           ready={(!!previewUrl || !!result) && !audioPlaying}
@@ -287,12 +290,32 @@ export function CloneTab({ onCreated }: Props) {
               src={sampleUrl(result.id)}
             />
           </div>
+        ) : previewUrl ? (
+          <audio
+            controls
+            autoPlay
+            className="w-full mt-4"
+            src={previewUrl}
+            onPlay={() => setAudioPlaying(true)}
+            onPause={() => setAudioPlaying(false)}
+            onEnded={() => setAudioPlaying(false)}
+          />
         ) : (
           <div className="mt-5 text-center text-xs text-[color:var(--muted)] max-w-xs">
             After cloning, your preview will appear here and the sphere will get
             a unique palette.
           </div>
         )}
+
+        {/* Session history: throwaway previews to A/B between. */}
+        <div className="w-full">
+          <SessionHistory
+            items={sessionItems}
+            activeId={activeSessionId}
+            onSelect={selectSessionItem}
+            onClear={sessionItems.length > 0 ? clearSession : undefined}
+          />
+        </div>
       </div>
     </div>
   );
