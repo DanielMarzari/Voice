@@ -139,12 +139,13 @@ void main() {
     return;
   }
 
-  // Flow speed gets a 3x boost while speaking — more roiling motion.
-  float t = uTime * (0.18 + 0.42 * uSpeaking) + uSeed;
+  // Flow speed: idle is already noticeably alive (ElevenLabs' ambient
+  // orbs visibly roil at rest). Speaking roughly doubles the pace.
+  float t = uTime * (0.45 + 0.55 * uSpeaking) + uSeed;
 
-  // Displacement amplitude: 0.35 calm → 0.75 speaking. This is what makes
-  // speaking look "disrupted" rather than just "faster."
-  float amp = mix(0.35, 0.75, uSpeaking);
+  // Displacement amplitude: idle is healthy motion; speaking pushes harder
+  // so the shape visibly deforms — that's the "disruption."
+  float amp = mix(0.50, 0.95, uSpeaking);
 
   // Domain warping: two passes of FBM where each pass's output perturbs
   // the next pass's input. Produces the fluid/smoke look.
@@ -183,15 +184,8 @@ void main() {
   float grain = (hash(vUv * 920.0 + t * 0.1) - 0.5) * 0.035;
   color += grain;
 
-  // Speaking-state disruption ring: a thin bright band that travels from
-  // center outward on a ~1.2s cycle while uSpeaking > 0.
-  if (uSpeaking > 0.02) {
-    float cycle = fract(uTime * 0.8);
-    float ring = smoothstep(0.03, 0.0, abs(r - cycle)) *
-                 (1.0 - cycle) *                 // fade out as it expands
-                 uSpeaking * 0.35;
-    color += vec3(1.0) * ring;
-  }
+  // (Disruption ring removed — speaking shows through via the amplitude
+  // + speed boost above alone.)
 
   // Circular alpha with 1px smooth edge.
   float aa = fwidth(r) * 0.9;

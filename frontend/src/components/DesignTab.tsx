@@ -6,6 +6,7 @@ import {
   listEngines,
   listPresets,
   previewDesign,
+  sampleUrl,
   type Engine,
   type Preset,
   type Profile,
@@ -295,7 +296,7 @@ export function DesignTab({ onCreated }: Props) {
             <audio
               controls
               className="w-full"
-              src={`/api/profiles/${result.id}/sample`}
+              src={sampleUrl(result.id)}
               onPlay={() => setAudioPlaying(true)}
               onPause={() => setAudioPlaying(false)}
               onEnded={() => setAudioPlaying(false)}

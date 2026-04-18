@@ -5,6 +5,7 @@ import {
   cloneVoice,
   listEngines,
   previewClone,
+  sampleUrl,
   type Engine,
   type Profile,
 } from "@/lib/api";
@@ -279,7 +280,7 @@ export function CloneTab({ onCreated }: Props) {
               onPlay={() => setAudioPlaying(true)}
               onPause={() => setAudioPlaying(false)}
               onEnded={() => setAudioPlaying(false)}
-              src={`/api/profiles/${result.id}/sample`}
+              src={sampleUrl(result.id)}
             />
           </div>
         ) : (

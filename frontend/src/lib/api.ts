@@ -1,5 +1,23 @@
-// Thin typed wrapper over the FastAPI backend. Next.js rewrites /api/*
-// to http://127.0.0.1:8000/api/* so relative paths are fine.
+// Thin typed wrapper over the FastAPI backend.
+//
+// We fetch the backend DIRECTLY (http://127.0.0.1:8000) rather than going
+// through Next.js's rewrites proxy. Reason: Next's internal HTTP proxy has
+// an undocumented ~30s idle timeout, but F5-TTS / XTTS synthesis regularly
+// takes 30-60s (longer on first call when weights are loading). The proxy
+// would reset the socket mid-synth, causing a 500 on the browser even though
+// the backend is still working. Going direct avoids the middleman entirely.
+//
+// CORS for localhost:3007 is already set up in backend/main.py.
+
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE ||
+  (typeof window !== "undefined" && window.location.hostname === "localhost"
+    ? "http://127.0.0.1:8000"
+    : "");
+
+function u(path: string): string {
+  return `${API_BASE}${path}`;
+}
 
 export type VoiceKind = "cloned" | "designed";
 
@@ -54,33 +72,33 @@ async function j<T>(r: Response): Promise<T> {
 }
 
 export async function getHealth(): Promise<Health> {
-  return j(await fetch("/api/health"));
+  return j(await fetch(u("/api/health")));
 }
 
 export async function listPresets(): Promise<Preset[]> {
-  const d = await j<{ presets: Preset[] }>(await fetch("/api/presets"));
+  const d = await j<{ presets: Preset[] }>(await fetch(u("/api/presets")));
   return d.presets;
 }
 
 export async function listEngines(): Promise<{ default: string; engines: Engine[] }> {
-  return j(await fetch("/api/engines"));
+  return j(await fetch(u("/api/engines")));
 }
 
 export async function listProfiles(): Promise<Profile[]> {
-  const d = await j<{ profiles: Profile[] }>(await fetch("/api/profiles"));
+  const d = await j<{ profiles: Profile[] }>(await fetch(u("/api/profiles")));
   return d.profiles;
 }
 
 export async function deleteProfile(id: string): Promise<void> {
-  await j(await fetch(`/api/profiles/${id}`, { method: "DELETE" }));
+  await j(await fetch(u(`/api/profiles/${id}`), { method: "DELETE" }));
 }
 
 export async function syncProfile(id: string): Promise<Profile> {
-  return j(await fetch(`/api/profiles/${id}/sync`, { method: "POST" }));
+  return j(await fetch(u(`/api/profiles/${id}/sync`), { method: "POST" }));
 }
 
 export function sampleUrl(id: string): string {
-  return `/api/profiles/${id}/sample`;
+  return u(`/api/profiles/${id}/sample`);
 }
 
 function cloneFormData(args: {
@@ -113,7 +131,7 @@ export async function cloneVoice(args: {
   const fd = cloneFormData(args);
   fd.append("upload", String(args.upload !== false));
   fd.append("save", "true");
-  return j(await fetch("/api/clone", { method: "POST", body: fd }));
+  return j(await fetch(u("/api/clone"), { method: "POST", body: fd }));
 }
 
 /** Preview a cloned voice without persisting. Returns an object URL for
@@ -127,7 +145,7 @@ export async function previewClone(args: {
 }): Promise<string> {
   const fd = cloneFormData(args);
   fd.append("save", "false");
-  const r = await fetch("/api/clone", { method: "POST", body: fd });
+  const r = await fetch(u("/api/clone"), { method: "POST", body: fd });
   if (!r.ok) {
     const body = await r.text().catch(() => "");
     throw new Error(
@@ -175,7 +193,7 @@ export async function designVoice(args: {
   previewText?: string;
   upload?: boolean;
 }): Promise<Profile> {
-  const url = `/api/design?upload=${args.upload !== false}`;
+  const url = u(`/api/design?upload=${args.upload !== false}`);
   return j(
     await fetch(url, {
       method: "POST",
@@ -195,7 +213,7 @@ export async function previewDesign(args: {
   temperature: number;
   previewText?: string;
 }): Promise<string> {
-  const r = await fetch("/api/design/preview", {
+  const r = await fetch(u("/api/design/preview"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: designBody(args),

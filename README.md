@@ -69,6 +69,14 @@ Open <http://localhost:3007>.
 - WAV or MP3 both fine; gets resampled to 24 kHz mono internally.
 - The first clone after startup takes ~30s (model download + warm-up). Subsequent clones are ~5–10s on M2.
 
+## Troubleshooting
+
+**`Failed to proxy … socket hang up` / `ECONNRESET` in the dev-server log** — the frontend used to route requests through Next.js's rewrites, which times out at ~30s. The frontend now calls the backend directly on `127.0.0.1:8000` so this is gone. If you still hit it, make sure `src/lib/api.ts` has the direct `API_BASE` — see the comment at the top of that file.
+
+**Backend crashes or gives a 500 partway through synthesis on Apple Silicon** — PyTorch's MPS backend has occasional bugs in STFT / istft paths (you'll see warnings like `An output with one or more elements was resized since it had shape []`). If you hit this, set `TTS_DEVICE=cpu` in `.env.local` and restart. Synthesis will be ~2× slower but 100% stable. XTTS falls back to CPU automatically if MPS `.to()` errors; F5-TTS does not, so the env var is the knob.
+
+**`Preset … is missing`** — shouldn't happen anymore; presets share a single reference clip that auto-downloads on first use. If the download can't reach GitHub, drop any ~5s clean-speech WAV at `backend/data/presets/base.wav` as a manual override.
+
 ## Licensing notes
 
 - **F5-TTS**: Apache 2.0 — use freely.

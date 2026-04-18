@@ -231,17 +231,30 @@ async def clone_voice(
 
 def _synthesize_design(req: "DesignRequest") -> bytes:
     """Core synthesis used by both save and preview paths. Raises HTTPException
-    on failure so the route handlers can pass-through the error."""
+    on failure so the route handlers can pass-through the error.
+
+    We log each phase separately so when a request dies we know which step
+    actually blew up (ref resolution / engine load / synthesis / pitch / mp3).
+    """
+    log.info(
+        "design: engine=%s lang=%s base=%s pitch=%.2f speed=%.2f temp=%.2f",
+        req.engine, req.language, req.base_voice, req.pitch, req.speed, req.temperature,
+    )
+
     try:
         ref_path, ref_text = tts.resolve_preset(req.base_voice)
+        log.info("design: resolved preset → %s", ref_path)
     except (ValueError, FileNotFoundError) as e:
+        log.warning("design: preset resolution failed: %s", e)
         raise HTTPException(400, str(e))
+
     try:
         engine = tts.get_engine(req.engine)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
     try:
+        log.info("design: synthesizing with %s on %s…", engine.id, engine.device)
         result = engine.synthesize(
             text=req.preview_text,
             ref_audio_path=ref_path,
@@ -249,13 +262,20 @@ def _synthesize_design(req: "DesignRequest") -> bytes:
             speed=req.speed,
             language=req.language,
         )
+        log.info(
+            "design: synth ok — %d samples @ %d Hz",
+            len(result.audio), result.sample_rate,
+        )
         if abs(req.pitch) > 0.01:
             result = tts.pitch_shift(result, req.pitch)
-        return tts.encode_mp3(result)
+            log.info("design: pitch shifted by %.2f semitones", req.pitch)
+        mp3 = tts.encode_mp3(result)
+        log.info("design: encoded %d bytes of mp3", len(mp3))
+        return mp3
     except HTTPException:
         raise
     except Exception as e:
-        log.exception("Design synthesis failed")
+        log.exception("design: synthesis failed")
         raise HTTPException(500, f"Synthesis failed: {e}")
 
 
