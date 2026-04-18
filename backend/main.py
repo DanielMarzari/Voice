@@ -3,9 +3,12 @@ Voice Studio — FastAPI entrypoint.
 
 Routes:
   GET  /api/health              — liveness + server-config status
+  GET  /api/engines             — list TTS engines with availability
   GET  /api/presets             — list the design preset speakers
   POST /api/clone               — clone a voice from an uploaded audio clip
-  POST /api/design              — design a voice from preset + sliders
+                                  (save=true → JSON profile; save=false → MP3 bytes)
+  POST /api/design              — persist a designed voice → JSON profile
+  POST /api/design/preview      — synth a designed voice without saving → MP3 bytes
   GET  /api/profiles            — list local profiles
   GET  /api/profiles/{id}       — fetch one profile
   GET  /api/profiles/{id}/sample — stream the preview MP3
@@ -27,7 +30,7 @@ from typing import Optional
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
 import profiles
@@ -124,9 +127,9 @@ def list_presets():
     return {"presets": tts.PRESETS}
 
 
-@app.post("/api/clone", response_model=ProfileResponse)
+@app.post("/api/clone")
 async def clone_voice(
-    name: str = Form(..., min_length=1, max_length=60),
+    name: str = Form("Preview", min_length=1, max_length=60),
     audio_file: UploadFile = File(...),
     engine_id: str = Form("xtts"),
     language: str = Form("en"),
@@ -135,14 +138,56 @@ async def clone_voice(
     ),
     ref_text: Optional[str] = Form(None),
     upload: bool = Form(True),
+    save: bool = Form(True),
 ):
-    """Clone a voice from an uploaded audio clip. Saves locally and
-    (optionally) uploads the preview to Reader."""
+    """Clone a voice from an uploaded audio clip.
+
+    If save=True (default), creates a local profile and (if upload=True)
+    pushes metadata + sample to Reader. Returns the ProfileResponse JSON.
+
+    If save=False, synthesizes but does NOT persist anything — returns
+    the raw audio/mpeg bytes. Used by the "Preview" button on the frontend
+    so the user can listen before committing.
+    """
     try:
         engine = tts.get_engine(engine_id)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
+    # Read the uploaded clip once into memory. Both the save and preview
+    # paths need it — the save path persists it as source.wav, the preview
+    # path writes it to a tempfile for the synthesis engine.
+    raw = await audio_file.read()
+    if not raw:
+        raise HTTPException(400, "audio_file is empty")
+    src_ext = os.path.splitext(audio_file.filename or "")[1].lower() or ".wav"
+
+    if not save:
+        # Preview-only path. Write to a tempfile, synthesize, stream bytes back.
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=src_ext, delete=False) as tf:
+            tf.write(raw)
+            tmp_path = tf.name
+        try:
+            result = engine.synthesize(
+                text=preview_text,
+                ref_audio_path=tmp_path,
+                ref_text=ref_text,
+                speed=1.0,
+                language=language,
+            )
+            mp3 = tts.encode_mp3(result)
+        except Exception as e:
+            log.exception("Preview clone synthesis failed")
+            raise HTTPException(500, f"Synthesis failed: {e}")
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+        return Response(content=mp3, media_type="audio/mpeg")
+
+    # Save path (default).
     profile = profiles.VoiceProfile(
         id=profiles.new_id(),
         name=name.strip(),
@@ -152,13 +197,8 @@ async def clone_voice(
         design={"language": language},
     )
     profile.dir().mkdir(parents=True, exist_ok=True)
-
-    # Save the uploaded reference clip as source.wav (or source.mp3 if that's
-    # what the user gave us; both F5 and XTTS accept common formats).
-    src_ext = os.path.splitext(audio_file.filename or "")[1].lower() or ".wav"
     src_path = profile.dir() / f"source{src_ext}"
-    with src_path.open("wb") as f:
-        shutil.copyfileobj(audio_file.file, f)
+    src_path.write_bytes(raw)
 
     try:
         result = engine.synthesize(
@@ -172,7 +212,6 @@ async def clone_voice(
         profile.sample_path().write_bytes(mp3)
     except Exception as e:
         log.exception("Clone synthesis failed")
-        # Clean up the half-created profile.
         shutil.rmtree(profile.dir(), ignore_errors=True)
         raise HTTPException(500, f"Synthesis failed: {e}")
 
@@ -190,9 +229,9 @@ async def clone_voice(
     return _to_response(profile)
 
 
-@app.post("/api/design", response_model=ProfileResponse)
-def design_voice(req: DesignRequest, upload: bool = True):
-    """Synthesize a 'designed' voice from a preset base + sliders."""
+def _synthesize_design(req: "DesignRequest") -> bytes:
+    """Core synthesis used by both save and preview paths. Raises HTTPException
+    on failure so the route handlers can pass-through the error."""
     try:
         ref_path, ref_text = tts.resolve_preset(req.base_voice)
     except (ValueError, FileNotFoundError) as e:
@@ -201,6 +240,44 @@ def design_voice(req: DesignRequest, upload: bool = True):
         engine = tts.get_engine(req.engine)
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+    try:
+        result = engine.synthesize(
+            text=req.preview_text,
+            ref_audio_path=ref_path,
+            ref_text=ref_text,
+            speed=req.speed,
+            language=req.language,
+        )
+        if abs(req.pitch) > 0.01:
+            result = tts.pitch_shift(result, req.pitch)
+        return tts.encode_mp3(result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.exception("Design synthesis failed")
+        raise HTTPException(500, f"Synthesis failed: {e}")
+
+
+@app.post("/api/design/preview")
+def preview_design(req: DesignRequest):
+    """Synthesize without persisting. Returns audio/mpeg bytes for in-browser
+    playback. The user can tweak sliders and call this repeatedly before
+    committing via POST /api/design."""
+    mp3 = _synthesize_design(req)
+    return Response(content=mp3, media_type="audio/mpeg")
+
+
+@app.post("/api/design", response_model=ProfileResponse)
+def design_voice(req: DesignRequest, upload: bool = True):
+    """Persist a 'designed' voice: synthesize, save locally, optionally
+    push to Reader."""
+    try:
+        engine = tts.get_engine(req.engine)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    mp3 = _synthesize_design(req)
 
     profile = profiles.VoiceProfile(
         id=profiles.new_id(),
@@ -217,24 +294,7 @@ def design_voice(req: DesignRequest, upload: bool = True):
         },
     )
     profile.dir().mkdir(parents=True, exist_ok=True)
-
-    try:
-        result = engine.synthesize(
-            text=req.preview_text,
-            ref_audio_path=ref_path,
-            ref_text=ref_text,
-            speed=req.speed,
-            language=req.language,
-        )
-        if abs(req.pitch) > 0.01:
-            result = tts.pitch_shift(result, req.pitch)
-        mp3 = tts.encode_mp3(result)
-        profile.sample_path().write_bytes(mp3)
-    except Exception as e:
-        log.exception("Design synthesis failed")
-        shutil.rmtree(profile.dir(), ignore_errors=True)
-        raise HTTPException(500, f"Synthesis failed: {e}")
-
+    profile.sample_path().write_bytes(mp3)
     profiles.save(profile)
 
     if upload and reader_client.is_configured():

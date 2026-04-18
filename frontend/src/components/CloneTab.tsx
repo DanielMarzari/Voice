@@ -1,7 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { cloneVoice, listEngines, type Engine, type Profile } from "@/lib/api";
+import {
+  cloneVoice,
+  listEngines,
+  previewClone,
+  type Engine,
+  type Profile,
+} from "@/lib/api";
 import { EnginePicker, useEngineChoice } from "@/components/EnginePicker";
 import { VoiceSphere } from "@/components/VoiceSphere";
 
@@ -17,10 +23,18 @@ export function CloneTab({ onCreated }: Props) {
   const [refText, setRefText] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"preview" | "save" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Profile | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Clean up object URLs to avoid leaking blob memory.
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
 
   const [engines, setEngines] = useState<Engine[] | null>(null);
   const [backendDefault, setBackendDefault] = useState<string | null>(null);
@@ -52,9 +66,34 @@ export function CloneTab({ onCreated }: Props) {
     if (f) setFile(f);
   }, []);
 
-  const onSubmit = useCallback(async () => {
+  const onPreview = useCallback(async () => {
+    if (!file || !engine || busy) return;
+    setBusy("preview");
+    setError(null);
+    // Release any prior preview blob before replacing.
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+      setPreviewUrl(null);
+    }
+    try {
+      const url = await previewClone({
+        file,
+        engine,
+        language,
+        previewText: previewText.trim() || undefined,
+        refText: refText.trim() || undefined,
+      });
+      setPreviewUrl(url);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }, [file, engine, language, previewText, refText, busy, previewUrl]);
+
+  const onSave = useCallback(async () => {
     if (!file || !name.trim() || !engine || busy) return;
-    setBusy(true);
+    setBusy("save");
     setError(null);
     setResult(null);
     try {
@@ -71,7 +110,7 @@ export function CloneTab({ onCreated }: Props) {
     } catch (e) {
       setError((e as Error).message);
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }, [file, name, engine, language, previewText, refText, busy, onCreated]);
 
@@ -178,16 +217,36 @@ export function CloneTab({ onCreated }: Props) {
           </div>
         </details>
 
-        <div className="flex items-center gap-3 pt-2">
+        <div className="flex items-center gap-3 pt-2 flex-wrap">
+          <button
+            className="btn"
+            onClick={onPreview}
+            disabled={!!busy || !file}
+            title="Synthesize without saving — listen before committing"
+          >
+            {busy === "preview" ? "Generating preview…" : "▶ Preview"}
+          </button>
           <button
             className="btn btn-primary"
-            onClick={onSubmit}
-            disabled={busy || !file || !name.trim()}
+            onClick={onSave}
+            disabled={!!busy || !file || !name.trim()}
           >
-            {busy ? "Cloning…" : "Clone voice"}
+            {busy === "save" ? "Saving…" : "Save voice"}
           </button>
           {error && <span className="text-sm text-red-500">{error}</span>}
         </div>
+
+        {previewUrl && !result && (
+          <div className="card mt-3">
+            <div className="text-xs text-[color:var(--muted)] mb-2">
+              Preview (not saved)
+            </div>
+            <audio controls autoPlay className="w-full" src={previewUrl} />
+            <div className="text-xs text-[color:var(--muted)] mt-2">
+              Sound good? Give it a name above and hit <strong>Save voice</strong>.
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="flex flex-col items-center">

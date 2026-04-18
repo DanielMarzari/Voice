@@ -239,28 +239,133 @@ def list_engines() -> list[dict]:
 
 
 # ---------------- Design preset speakers ----------------
+#
+# Zero-shot cloning needs a reference clip. Rather than asking the user
+# to supply 4 distinct WAVs by hand (the Phase-1 design that bit us), we
+# now use a single shared "neutral" reference clip and let each preset
+# differ only in its default slider suggestions. The reference is resolved
+# in priority order:
+#
+#   1. Custom override at data/presets/base.wav  (user can swap in their own)
+#   2. F5-TTS's bundled example clip (ships with `pip install f5-tts`)
+#   3. Auto-downloaded from the F5-TTS GitHub repo (Apache 2.0)
+#
+# Each preset's "flavor" is entirely driven by its default_pitch / default_speed
+# on the frontend sliders — the user can always nudge from there.
 
 PRESET_DIR = Path(__file__).parent / "data" / "presets"
+PRESET_DIR.mkdir(parents=True, exist_ok=True)
+
+_FALLBACK_REF_URL = (
+    "https://raw.githubusercontent.com/SWivid/F5-TTS/main/"
+    "src/f5_tts/infer/examples/basic/basic_ref_en.wav"
+)
+_FALLBACK_REF_TEXT = (
+    "Some call me nature. Others call me mother nature."
+)
 
 PRESETS = [
-    {"id": "amber",  "label": "Amber (warm, bright)",    "file": "amber.wav",  "ref_text": "Hello, this is a warm and friendly voice."},
-    {"id": "cobalt", "label": "Cobalt (calm, low)",      "file": "cobalt.wav", "ref_text": "This is a calm, measured voice speaking."},
-    {"id": "rose",   "label": "Rose (soft, expressive)", "file": "rose.wav",   "ref_text": "A soft and expressive voice, full of nuance."},
-    {"id": "slate",  "label": "Slate (neutral news)",    "file": "slate.wav",  "ref_text": "This is a neutral news-reader voice."},
+    {
+        "id": "amber",
+        "label": "Amber (warm, bright)",
+        "default_pitch": 1.0,
+        "default_speed": 1.0,
+        "default_temperature": 0.8,
+    },
+    {
+        "id": "cobalt",
+        "label": "Cobalt (calm, low)",
+        "default_pitch": -2.0,
+        "default_speed": 0.95,
+        "default_temperature": 0.6,
+    },
+    {
+        "id": "rose",
+        "label": "Rose (soft, expressive)",
+        "default_pitch": 2.0,
+        "default_speed": 0.95,
+        "default_temperature": 0.95,
+    },
+    {
+        "id": "slate",
+        "label": "Slate (neutral news)",
+        "default_pitch": 0.0,
+        "default_speed": 1.05,
+        "default_temperature": 0.5,
+    },
 ]
 
 
+def _f5_bundled_example() -> Optional[Path]:
+    """Try to find F5-TTS's shipped reference WAV inside the installed package."""
+    try:
+        import f5_tts  # type: ignore
+        from importlib.resources import files as pkg_files
+
+        # F5's canonical example. Path changed across versions — try a few.
+        candidates = [
+            pkg_files(f5_tts) / "infer" / "examples" / "basic" / "basic_ref_en.wav",
+            pkg_files(f5_tts) / "infer" / "examples" / "basic_ref_en.wav",
+        ]
+        for c in candidates:
+            try:
+                if c.is_file():
+                    return Path(str(c))
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return None
+
+
+def _download_fallback_ref(dest: Path) -> None:
+    """Download a public-domain reference clip from the F5-TTS repo (Apache 2.0)."""
+    import urllib.request
+
+    log.info("Downloading fallback reference clip → %s", dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with urllib.request.urlopen(_FALLBACK_REF_URL, timeout=30) as r:
+        data = r.read()
+    dest.write_bytes(data)
+    log.info("Saved %d bytes to %s", len(data), dest)
+
+
+def _resolve_base_reference() -> tuple[str, str]:
+    """Return (path, ref_text) for the shared base reference clip."""
+    # 1. User-provided override.
+    custom = PRESET_DIR / "base.wav"
+    if custom.exists():
+        # Honor a per-file transcript if the user dropped `base.txt` alongside.
+        txt = PRESET_DIR / "base.txt"
+        ref_text = txt.read_text().strip() if txt.exists() else ""
+        return str(custom), ref_text
+
+    # 2. F5-TTS's bundled example.
+    bundled = _f5_bundled_example()
+    if bundled is not None:
+        return str(bundled), _FALLBACK_REF_TEXT
+
+    # 3. Download once and cache.
+    cached = PRESET_DIR / "fallback_ref_en.wav"
+    if not cached.exists():
+        try:
+            _download_fallback_ref(cached)
+        except Exception as e:
+            raise FileNotFoundError(
+                f"No reference clip available. Tried custom ({custom}), "
+                f"F5-TTS bundled example, and download from {_FALLBACK_REF_URL}. "
+                f"Error: {e}. Drop a ~5s WAV at {custom} as a workaround."
+            )
+    return str(cached), _FALLBACK_REF_TEXT
+
+
 def resolve_preset(preset_id: str) -> tuple[str, str]:
-    for p in PRESETS:
-        if p["id"] == preset_id:
-            path = PRESET_DIR / p["file"]
-            if not path.exists():
-                raise FileNotFoundError(
-                    f"Preset '{preset_id}' is defined but {path} is missing. "
-                    f"Drop a WAV clip there (see backend/data/presets/README.md)."
-                )
-            return str(path), p["ref_text"]
-    raise ValueError(f"Unknown preset id: {preset_id}")
+    """Return (ref_audio_path, ref_text). All presets share one reference
+    clip — their 'personality' is expressed via the slider defaults the
+    frontend applies. Keeps setup friction to zero."""
+    if not any(p["id"] == preset_id for p in PRESETS):
+        raise ValueError(f"Unknown preset id: {preset_id}")
+    return _resolve_base_reference()
 
 
 # ---------------- Audio helpers ----------------
