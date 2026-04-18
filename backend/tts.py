@@ -446,6 +446,24 @@ def resolve_preset(preset_id: str) -> tuple[str, str]:
     return _resolve_base_reference()
 
 
+def _read_ref_meta(wav_path: Path) -> dict:
+    """Read the sidecar .json for a user reference, if present.
+    Holds human-readable name + description (since the filesystem slug
+    is lowercase/hyphenated)."""
+    meta_path = wav_path.with_suffix(".json")
+    if meta_path.exists():
+        try:
+            import json as _json
+            return _json.loads(meta_path.read_text())
+        except Exception:
+            pass
+    # Fallback: derive name from filename.
+    return {
+        "name": wav_path.stem.replace("_", " ").replace("-", " ").strip(),
+        "description": "",
+    }
+
+
 def list_user_references() -> list[dict]:
     """List WAVs dropped into data/presets/user/, for the Design tab dropdown."""
     if not USER_REF_DIR.exists():
@@ -454,15 +472,28 @@ def list_user_references() -> list[dict]:
     for p in sorted(USER_REF_DIR.iterdir()):
         if not p.is_file() or p.suffix.lower() != ".wav":
             continue
+        meta = _read_ref_meta(p)
+        # Display label: "Alex (friendly, inviting and balanced)" when a
+        # description is present; otherwise just the name.
+        name = meta.get("name") or p.stem.replace("_", " ").replace("-", " ")
+        desc = (meta.get("description") or "").strip()
+        label = f"{name} ({desc})" if desc else name
         out.append({
             "id": f"user:{p.stem}",
-            "label": p.stem.replace("_", " ").replace("-", " ").strip(),
+            "label": label,
+            "name": name,
+            "description": desc,
             "path": str(p),
         })
     return out
 
 
-def save_user_reference(name: str, audio_bytes: bytes, transcript: str = "") -> dict:
+def save_user_reference(
+    name: str,
+    audio_bytes: bytes,
+    description: str = "",
+    transcript: str = "",
+) -> dict:
     """Save an uploaded audio clip as a new user reference.
 
     Converts whatever format the user gave us (WAV / MP3 / M4A / ...) to
@@ -471,6 +502,7 @@ def save_user_reference(name: str, audio_bytes: bytes, transcript: str = "") -> 
     """
     from pydub import AudioSegment
     import io as _io
+    import json as _json
     import re as _re
 
     slug = _re.sub(r"[^a-z0-9_-]+", "-", name.lower().strip()).strip("-") or "reference"
@@ -486,22 +518,32 @@ def save_user_reference(name: str, audio_bytes: bytes, transcript: str = "") -> 
     USER_REF_DIR.mkdir(parents=True, exist_ok=True)
     seg.export(target, format="wav")
 
+    # Sidecar JSON preserves the exact name + description the user typed.
+    meta = {"name": name.strip(), "description": description.strip()}
+    (USER_REF_DIR / f"{target.stem}.json").write_text(_json.dumps(meta, indent=2))
+
     if transcript.strip():
         (USER_REF_DIR / f"{target.stem}.txt").write_text(transcript.strip())
 
+    display_label = (
+        f"{meta['name']} ({meta['description']})" if meta["description"] else meta["name"]
+    )
     return {
         "id": f"user:{target.stem}",
-        "label": target.stem.replace("_", " ").replace("-", " "),
+        "label": display_label,
+        "name": meta["name"],
+        "description": meta["description"],
         "path": str(target),
     }
 
 
 def delete_user_reference(slug: str) -> bool:
-    """Remove a user reference clip + its transcript."""
+    """Remove a user reference clip + its sidecars."""
     wav = USER_REF_DIR / f"{slug}.wav"
     txt = USER_REF_DIR / f"{slug}.txt"
+    meta = USER_REF_DIR / f"{slug}.json"
     ok = False
-    for p in (wav, txt):
+    for p in (wav, txt, meta):
         if p.exists():
             p.unlink()
             ok = True

@@ -4,19 +4,15 @@ Client for pushing voice profiles to the Reader server.
 The Reader endpoint is `POST /api/voices` which accepts multipart:
   - field `metadata`: JSON blob with {id, name, kind, engine, createdAt, design}
   - field `sample`:   audio/mpeg file (the preview MP3)
+  - field `cover`:    image/* file (optional profile picture)
   - header Authorization: Bearer <token>
-
-The token is generated from Reader → Voice Lab → "Generate Studio Token".
-Stored hashed server-side, shown once at creation.
 
 Configuration sources, highest priority first:
   1. Runtime overrides set by set_config() — typed in the Settings gear
-     in Voice Studio's header.
+     in Voice Studio's header. Persisted to backend/data/config.json so
+     the user only has to paste credentials once.
   2. Environment variables READER_BASE_URL / READER_AUTH_TOKEN (from
      .env.local loaded at startup).
-
-This means the user can paste credentials in the UI without editing
-files or restarting the backend.
 """
 
 from __future__ import annotations
@@ -24,7 +20,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-from dataclasses import asdict
 from pathlib import Path
 from typing import Optional
 
@@ -43,19 +38,64 @@ class ReaderUploadError(RuntimeError):
     """Raised on non-2xx response from the Reader server."""
 
 
-# Runtime overrides set via POST /api/config. When None, we fall back to env.
+# Persisted override store. Lives next to the rest of the user's local
+# data (gitignored) so the token stays put across backend restarts. Mode
+# 0600 ensures other users on the machine can't read it.
+_CONFIG_PATH = Path(__file__).parent / "data" / "config.json"
+
+# Runtime overrides — initialized from _CONFIG_PATH at import time.
 _override_base: Optional[str] = None
 _override_token: Optional[str] = None
 
 
+def _load_persisted() -> None:
+    global _override_base, _override_token
+    try:
+        if _CONFIG_PATH.exists():
+            raw = json.loads(_CONFIG_PATH.read_text())
+            b = raw.get("reader_base_url")
+            t = raw.get("reader_auth_token")
+            if b:
+                _override_base = b.rstrip("/")
+            if t:
+                _override_token = t
+            log.info("Loaded persisted reader config from %s", _CONFIG_PATH)
+    except Exception as e:
+        log.warning("Couldn't read %s (%s) — falling back to env only", _CONFIG_PATH, e)
+
+
+def _save_persisted() -> None:
+    """Write current overrides to disk. 0600 perms so only the local user
+    can read the token. Writes atomically via a temp file + replace."""
+    try:
+        _CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "reader_base_url": _override_base,
+            "reader_auth_token": _override_token,
+        }
+        tmp = _CONFIG_PATH.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(payload, indent=2))
+        os.chmod(tmp, 0o600)
+        tmp.replace(_CONFIG_PATH)
+    except Exception as e:
+        log.warning("Couldn't persist reader config: %s", e)
+
+
+# Load persisted config at module import so later requests see it.
+_load_persisted()
+
+
 def set_config(base_url: Optional[str], auth_token: Optional[str]) -> None:
-    """Update the in-memory config. Pass None for either to clear its
-    override (re-reads the env value for that field). Does NOT persist
-    to disk — a backend restart reverts to env-only config, which is the
-    desired behavior so secrets stay out of committed files."""
+    """Update the override store and persist to disk. Passing None for
+    either field clears that override (re-reads the env value).
+
+    Note on security: the token is written to backend/data/config.json
+    with mode 0600. That path is gitignored. If you want secrets to live
+    only in env vars, clear the overrides and use .env.local."""
     global _override_base, _override_token
     _override_base = base_url.rstrip("/") if base_url else None
     _override_token = auth_token if auth_token else None
+    _save_persisted()
 
 
 def _config() -> tuple[str, str]:
@@ -89,9 +129,17 @@ def token_is_set() -> bool:
     return bool(_override_token or os.environ.get("READER_AUTH_TOKEN"))
 
 
-def upload_profile(profile: VoiceProfile) -> dict:
-    """POST a profile + its sample.mp3 to the Reader server.
-    Returns the server's JSON response on success."""
+def upload_profile(
+    profile: VoiceProfile,
+    cover_path: Optional[Path] = None,
+) -> dict:
+    """POST a profile + its sample.mp3 (+ optional cover image) to Reader.
+    Returns the server's JSON response on success.
+
+    `cover_path` is an absolute path to an image file (PNG/JPEG/WebP/GIF).
+    When present, it's shipped as a third multipart field and Reader uses
+    it as the profile picture instead of rendering the dynamic sphere.
+    """
     base, token = _config()
 
     sample_path = profile.sample_path()
@@ -107,12 +155,26 @@ def upload_profile(profile: VoiceProfile) -> dict:
         "design": profile.design,
     }
 
-    with sample_path.open("rb") as f:
-        files = {
-            "metadata": (None, json.dumps(payload), "application/json"),
-            "sample":   ("sample.mp3", f, "audio/mpeg"),
-        }
-        headers = {"Authorization": f"Bearer {token}"}
+    headers = {"Authorization": f"Bearer {token}"}
+
+    sample_f = sample_path.open("rb")
+    cover_f = cover_path.open("rb") if cover_path and cover_path.exists() else None
+    try:
+        files = [
+            ("metadata", (None, json.dumps(payload), "application/json")),
+            ("sample", ("sample.mp3", sample_f, "audio/mpeg")),
+        ]
+        if cover_f is not None:
+            assert cover_path is not None
+            ctype = {
+                ".png": "image/png",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".webp": "image/webp",
+                ".gif": "image/gif",
+            }.get(cover_path.suffix.lower(), "application/octet-stream")
+            files.append(("cover", (f"cover{cover_path.suffix.lower()}", cover_f, ctype)))
+
         try:
             r = httpx.post(
                 f"{base}/api/voices",
@@ -122,6 +184,10 @@ def upload_profile(profile: VoiceProfile) -> dict:
             )
         except httpx.HTTPError as e:
             raise ReaderUploadError(f"Network error to {base}: {e}") from e
+    finally:
+        sample_f.close()
+        if cover_f is not None:
+            cover_f.close()
 
     if r.status_code // 100 != 2:
         raise ReaderUploadError(
