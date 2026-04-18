@@ -19,10 +19,14 @@ out/
 *.tsbuildinfo
 next-env.d.ts
 
-# Local data (voice profiles are per-user, stay local)
-backend/data/profiles/
-backend/data/cache/
-backend/data/models/
+# Local data (voice profiles are per-user, stay local).
+# Use ** so nested paths (e.g. backend/backend/data/cache when uvicorn is
+# launched from the backend/ dir with a relative HF_HOME) are also ignored.
+**/data/profiles/
+**/data/cache/
+**/data/models/
+# Also catch the misnested dir pattern outright.
+backend/backend/
 
 # Env
 .env
