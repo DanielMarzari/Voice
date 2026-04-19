@@ -62,6 +62,32 @@ That spawns FastAPI on :8000 and Next.js on :3007, then traps SIGINT so Ctrl-C c
 
 Open <http://localhost:3007>.
 
+## Render queue (Reader audiobooks)
+
+Once Voice Studio is connected to Reader (Settings gear → paste URL + token), a background worker polls Reader for pending render jobs. When you click **▶ Listen with…** on a document in Reader, it queues a render job; Voice Studio picks it up, synthesizes locally, and ships back MP3 chunks + word timings. Reader plays back pre-rendered audio from its own disk — no live synthesis, no localhost dance.
+
+Control all of this from the **Queue** tab in Voice Studio:
+- See what's currently rendering (doc title, voice, chunk progress).
+- Pause / Resume the worker.
+- Toggle **Overnight only** — worker stays idle 6 AM – 10 PM and burns through the queue while you sleep.
+- **Test Reader connection** — one click to confirm the bearer token still works.
+
+## Auto-start on login
+
+Two options (pick one; they can coexist):
+
+**LaunchAgent (headless, fire-and-forget):**
+```bash
+./scripts/install-autostart.sh
+```
+Creates `~/Library/LaunchAgents/com.danmarzari.voice-studio.plist`. Voice Studio starts on login, logs to `~/Library/Logs/voice-studio.{out,err}.log`, and auto-restarts if it crashes. Uninstall: `launchctl unload ~/Library/LaunchAgents/com.danmarzari.voice-studio.plist && rm "$_"`.
+
+**Desktop .app (click to launch):**
+```bash
+./scripts/build-app.sh
+```
+Drops a `Voice Studio.app` on your Desktop. Double-clicking it opens a Terminal window with the backend running + Safari at `localhost:3007`. Drag to Applications and add to System Settings → Login Items for auto-start with a visible window.
+
 ## Voice cloning quality tips
 
 - Sample length: **10–20 seconds** of clean speech. One continuous clip beats many short ones.

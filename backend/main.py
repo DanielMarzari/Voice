@@ -23,9 +23,13 @@ Routes:
   DELETE /api/profiles/{id}     — delete local + remote
   POST /api/profiles/{id}/sync  — re-push to Reader if missing there
   POST /api/synthesize          — generate audio for arbitrary text with
-                                  a saved voice (this is what Reader's
-                                  chunked read-aloud hits)
+                                  a saved voice (standalone synth helper)
   GET  /api/synthesize/voices   — voices Reader can use for synthesis
+  GET  /api/render-queue        — render worker snapshot (UI polling)
+  POST /api/render-queue/pause
+  POST /api/render-queue/resume
+  POST /api/render-queue/settings — overnight_only / render_worker_enabled
+  POST /api/render-queue/test   — confirm Reader bearer token works
 
 All routes bind to 127.0.0.1 only via start.sh. CORS open to localhost
 for the Next.js frontend.
@@ -48,6 +52,7 @@ from pydantic import BaseModel, Field
 
 import profiles
 import reader_client
+import render_worker
 import training
 import tts
 
@@ -62,6 +67,23 @@ logging.basicConfig(
 log = logging.getLogger("voice-studio")
 
 app = FastAPI(title="Voice Studio", version="0.1.0")
+
+
+@app.on_event("startup")
+def _start_render_worker() -> None:
+    # Apply persisted preferences before the worker starts polling.
+    s = reader_client.get_settings()
+    render_worker.worker.set_overnight_only(bool(s.get("overnight_only", False)))
+    if bool(s.get("render_worker_enabled", True)):
+        render_worker.worker.start()
+    else:
+        render_worker.worker.pause()
+
+
+@app.on_event("shutdown")
+def _stop_render_worker() -> None:
+    render_worker.worker.stop()
+
 
 # CORS is deliberately wide-open for local/known origins:
 #   - localhost:3007 → the Voice Studio frontend itself
@@ -850,3 +872,79 @@ def list_synthesize_voices():
             "engine": p.engine,
         })
     return {"voices": out}
+
+
+# ---------------------------------------------------------------------
+# Render queue — status + control for the background worker that drains
+# Reader's render_jobs table.
+# ---------------------------------------------------------------------
+
+
+class RenderQueueSettings(BaseModel):
+    render_worker_enabled: Optional[bool] = None
+    overnight_only: Optional[bool] = None
+
+
+@app.get("/api/render-queue")
+def get_render_queue():
+    """Snapshot of the worker: running/paused, current job + progress,
+    completed/failed counters, whether Reader is reachable. The Queue
+    tab polls this every few seconds to render its UI."""
+    snapshot = render_worker.worker.snapshot()
+    snapshot["settings"] = reader_client.get_settings()
+    return snapshot
+
+
+@app.post("/api/render-queue/pause")
+def render_queue_pause():
+    render_worker.worker.pause()
+    reader_client.update_settings({"render_worker_enabled": False})
+    return render_worker.worker.snapshot()
+
+
+@app.post("/api/render-queue/resume")
+def render_queue_resume():
+    render_worker.worker.resume()
+    reader_client.update_settings({"render_worker_enabled": True})
+    return render_worker.worker.snapshot()
+
+
+@app.post("/api/render-queue/settings")
+def render_queue_settings(patch: RenderQueueSettings):
+    """Update persisted worker knobs. Pass only the fields you want to
+    change; others stay put."""
+    update: dict = {}
+    if patch.render_worker_enabled is not None:
+        update["render_worker_enabled"] = bool(patch.render_worker_enabled)
+    if patch.overnight_only is not None:
+        update["overnight_only"] = bool(patch.overnight_only)
+    reader_client.update_settings(update)
+    # Push live into the worker so the change takes effect without restart.
+    if "render_worker_enabled" in update:
+        if update["render_worker_enabled"]:
+            render_worker.worker.resume()
+        else:
+            render_worker.worker.pause()
+    if "overnight_only" in update:
+        render_worker.worker.set_overnight_only(update["overnight_only"])
+    snapshot = render_worker.worker.snapshot()
+    snapshot["settings"] = reader_client.get_settings()
+    return snapshot
+
+
+@app.post("/api/render-queue/test")
+def render_queue_test():
+    """Manual 'ping' — hits Reader's pending-jobs endpoint so the user
+    can confirm the bearer token works. Returns {count} or an error."""
+    try:
+        jobs = render_client_list_pending()
+    except Exception as e:
+        raise HTTPException(502, f"Reader not reachable: {e}")
+    return {"ok": True, "pending_count": len(jobs)}
+
+
+def render_client_list_pending() -> list[dict]:
+    """Indirection layer so /render-queue/test doesn't import
+    render_client at module-top — keeps the import graph clean."""
+    import render_client as rc
+    return rc.list_pending_jobs(limit=5)

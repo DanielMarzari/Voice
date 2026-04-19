@@ -291,6 +291,55 @@ def list_engines() -> list[dict]:
     return [e.info() for e in ENGINES.values()]
 
 
+# ---------------- Voice-profile → synthesis inputs ----------------
+#
+# Shared by the /api/synthesize route (not yet used by Reader) and the
+# render worker. Resolves a saved profile to (ref_path, ref_text,
+# speaker_name, engine_id) — everything `engine.synthesize(...)` needs.
+
+
+def resolve_voice_for_synth(profile) -> tuple[str, Optional[str], Optional[str], str]:
+    """Look up a VoiceProfile and return the inputs needed to synthesize
+    arbitrary text in that voice. Supports 'cloned' and 'designed' kinds.
+    'uploaded' kinds have no engine attached — caller must handle before
+    calling this helper.
+
+    Returns (ref_audio_path, ref_text, speaker_name, engine_id).
+    """
+    if profile.kind == "uploaded":
+        raise ValueError(
+            "Uploaded voices are static audio only — they can't synthesize "
+            "new text. Use Clone or Design to get a synthesizable voice."
+        )
+
+    # Normalize legacy engine strings (e.g. 'f5-tts' → 'f5').
+    engine_id = (profile.engine or DEFAULT_ENGINE)
+    engine_id = {"f5-tts": "f5"}.get(engine_id, engine_id)
+
+    if profile.kind == "cloned":
+        # Cloned voices store source.<ext> in their profile dir. Accept any ext.
+        dir_ = profile.dir()
+        sources = [p for p in dir_.iterdir() if p.stem == "source" and p.is_file()]
+        if not sources:
+            raise FileNotFoundError(
+                f"Cloned profile {profile.id} is missing its source reference clip"
+            )
+        return str(sources[0]), None, None, engine_id
+
+    if profile.kind == "designed":
+        design = profile.design or {}
+        speaker_name = design.get("speaker_name")  # XTTS-only, optional
+        base_voice = design.get("base_voice")
+        if not base_voice:
+            raise ValueError(
+                f"Designed profile {profile.id} missing design.base_voice"
+            )
+        ref_path, ref_text = resolve_preset(base_voice)
+        return ref_path, ref_text, speaker_name, engine_id
+
+    raise ValueError(f"Unknown voice kind: {profile.kind}")
+
+
 # ---------------- Design preset speakers ----------------
 #
 # Zero-shot cloning needs a reference clip. Rather than asking the user

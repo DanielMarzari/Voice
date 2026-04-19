@@ -47,6 +47,13 @@ _CONFIG_PATH = Path(__file__).parent / "data" / "config.json"
 _override_base: Optional[str] = None
 _override_token: Optional[str] = None
 
+# Extra settings stored alongside the reader config. Kept here (not in a
+# separate file) so one config.json round-trips the full backend state.
+_settings: dict = {
+    "render_worker_enabled": True,
+    "overnight_only": False,
+}
+
 
 def _load_persisted() -> None:
     global _override_base, _override_token
@@ -59,6 +66,8 @@ def _load_persisted() -> None:
                 _override_base = b.rstrip("/")
             if t:
                 _override_token = t
+            if isinstance(raw.get("settings"), dict):
+                _settings.update(raw["settings"])
             log.info("Loaded persisted reader config from %s", _CONFIG_PATH)
     except Exception as e:
         log.warning("Couldn't read %s (%s) — falling back to env only", _CONFIG_PATH, e)
@@ -72,6 +81,7 @@ def _save_persisted() -> None:
         payload = {
             "reader_base_url": _override_base,
             "reader_auth_token": _override_token,
+            "settings": _settings,
         }
         tmp = _CONFIG_PATH.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(payload, indent=2))
@@ -79,6 +89,20 @@ def _save_persisted() -> None:
         tmp.replace(_CONFIG_PATH)
     except Exception as e:
         log.warning("Couldn't persist reader config: %s", e)
+
+
+def get_settings() -> dict:
+    """Read-only snapshot of the persisted settings (worker toggles etc.)."""
+    return dict(_settings)
+
+
+def update_settings(patch: dict) -> dict:
+    """Merge `patch` into persisted settings, write to disk, return the
+    updated dict. Unknown keys are accepted but intended to be one of
+    the known worker knobs."""
+    _settings.update(patch)
+    _save_persisted()
+    return dict(_settings)
 
 
 # Load persisted config at module import so later requests see it.
