@@ -8,6 +8,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { DropZone } from "@/components/DropZone";
 
 type Props = {
   open: boolean;
@@ -117,16 +118,14 @@ export function UploadReferenceModal({ open, onClose, onSubmit }: Props) {
 
           <div>
             <label className="block text-xs font-medium mb-1">Audio file</label>
-            <input
-              type="file"
+            <DropZone
               accept="audio/*,.wav,.mp3,.m4a,.ogg,.flac"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              file={file}
+              onFile={setFile}
+              label="Drag & drop a voice clip"
+              hint="~10 s of clean speech works best"
+              minHeight={110}
             />
-            {file && (
-              <div className="text-xs text-[color:var(--muted)] mt-1">
-                {file.name} · {(file.size / 1024).toFixed(0)} KB
-              </div>
-            )}
           </div>
         </div>
 

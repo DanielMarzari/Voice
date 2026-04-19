@@ -13,14 +13,9 @@
  * Result gets auto-synced to Reader if the Settings gear is configured.
  */
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { importVoice, type Profile } from "@/lib/api";
+import { DropZone } from "@/components/DropZone";
 import { MoodPicker } from "@/components/MoodPicker";
 import { VoiceSphere } from "@/components/VoiceSphere";
 import { MOODS, moodPalette, type Palette } from "@/lib/moodPalettes";
@@ -46,9 +41,6 @@ export function ImportTab({ onCreated }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Profile | null>(null);
-
-  const audioInputRef = useRef<HTMLInputElement>(null);
-  const coverInputRef = useRef<HTMLInputElement>(null);
 
   // Keep object-URL previews in sync with the uploaded file state.
   useEffect(() => {
@@ -152,37 +144,19 @@ export function ImportTab({ onCreated }: Props) {
               WAV/MP3/M4A/OGG/FLAC · auto-converted to MP3
             </span>
           </label>
-          <div
-            onClick={() => audioInputRef.current?.click()}
-            className="card flex items-center justify-center text-center cursor-pointer"
-            style={{ minHeight: 88 }}
-          >
-            <input
-              ref={audioInputRef}
-              type="file"
-              accept="audio/*,.wav,.mp3,.m4a,.ogg,.flac"
-              className="hidden"
-              onChange={(e) => setAudio(e.target.files?.[0] ?? null)}
-            />
-            {audio ? (
-              <div>
-                <div className="text-sm font-medium">{audio.name}</div>
-                <div className="text-xs text-[color:var(--muted)] mt-1">
-                  {(audio.size / 1024).toFixed(0)} KB · click to replace
-                </div>
-              </div>
-            ) : (
-              <div>
-                <div className="text-sm font-medium">Click to select an audio file</div>
-                <div className="text-xs text-[color:var(--muted)] mt-1">
-                  up to 20 MB
-                </div>
-              </div>
-            )}
-          </div>
-          {audioUrl && (
-            <audio controls className="w-full mt-2" src={audioUrl} />
-          )}
+          <DropZone
+            accept="audio/*,.wav,.mp3,.m4a,.ogg,.flac"
+            file={audio}
+            onFile={setAudio}
+            label="Drag & drop an audio file here"
+            hint="WAV · MP3 · M4A · OGG · FLAC — up to 20 MB"
+            minHeight={120}
+            preview={
+              audioUrl ? (
+                <audio controls className="w-full" src={audioUrl} />
+              ) : null
+            }
+          />
         </div>
 
         <div>
@@ -208,44 +182,24 @@ export function ImportTab({ onCreated }: Props) {
 
           {visual === "picture" && (
             <div className="mt-3">
-              <div
-                onClick={() => coverInputRef.current?.click()}
-                className="card flex items-center justify-center text-center cursor-pointer"
-                style={{ minHeight: 72 }}
-              >
-                <input
-                  ref={coverInputRef}
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp,image/gif"
-                  className="hidden"
-                  onChange={(e) => setCover(e.target.files?.[0] ?? null)}
-                />
-                {cover ? (
-                  <div className="flex items-center gap-3">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    {coverUrl && (
-                      <img
-                        src={coverUrl}
-                        alt="cover preview"
-                        className="w-12 h-12 rounded-full object-cover border border-[color:var(--border)]"
-                      />
-                    )}
-                    <div className="text-left">
-                      <div className="text-sm font-medium">{cover.name}</div>
-                      <div className="text-xs text-[color:var(--muted)]">
-                        {(cover.size / 1024).toFixed(0)} KB · click to replace
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div>
-                    <div className="text-sm font-medium">Click to select an image</div>
-                    <div className="text-xs text-[color:var(--muted)] mt-1">
-                      PNG / JPEG / WebP / GIF · up to 5 MB
-                    </div>
-                  </div>
-                )}
-              </div>
+              <DropZone
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                file={cover}
+                onFile={setCover}
+                label="Drag & drop a profile picture"
+                hint="PNG · JPEG · WebP · GIF — up to 5 MB"
+                minHeight={100}
+                preview={
+                  coverUrl ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img
+                      src={coverUrl}
+                      alt="cover preview"
+                      className="w-16 h-16 rounded-full object-cover border border-[color:var(--border)]"
+                    />
+                  ) : null
+                }
+              />
             </div>
           )}
         </div>

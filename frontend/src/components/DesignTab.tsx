@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   DEFAULT_PREVIEW_TEXT,
+  deleteReference,
   designVoice,
   listEngines,
   listPresets,
@@ -109,6 +110,25 @@ export function DesignTab({ onCreated }: Props) {
     setReferences((r) => [...r.filter((x) => x.id !== added.id), added]);
     // Auto-select the newly uploaded reference.
     setBaseVoice(added.id);
+  }
+
+  async function handleReferenceDelete(refId: string) {
+    const ref = references.find((r) => r.id === refId);
+    if (!ref) return;
+    const confirmMsg = `Delete "${ref.name}"?\n\nThis removes the reference clip from data/presets/user/ and the dropdown. Voices you already saved using it are unaffected.`;
+    if (!confirm(confirmMsg)) return;
+    // ref.id is "user:<slug>" — strip the prefix for the DELETE call.
+    const slug = refId.startsWith("user:") ? refId.slice(5) : refId;
+    try {
+      await deleteReference(slug);
+      setReferences((r) => r.filter((x) => x.id !== refId));
+      // If the deleted ref was the active base voice, revert to the first preset.
+      if (baseVoice === refId && presets.length > 0) {
+        selectPreset(presets[0].id);
+      }
+    } catch (e) {
+      alert((e as Error).message);
+    }
   }
 
   // Keep language valid for the chosen engine.
@@ -371,6 +391,17 @@ export function DesignTab({ onCreated }: Props) {
             >
               ⇡ Upload
             </button>
+            {baseVoice.startsWith("user:") && (
+              <button
+                type="button"
+                className="btn !text-red-500 !px-2"
+                onClick={() => handleReferenceDelete(baseVoice)}
+                title="Delete this uploaded reference"
+                aria-label="Delete reference"
+              >
+                ✕
+              </button>
+            )}
           </div>
           <div className="text-xs text-[color:var(--muted)] mt-1">
             Drop a ~10s clean speech clip. Works with both F5-TTS and XTTS.

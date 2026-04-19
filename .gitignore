@@ -28,6 +28,9 @@ next-env.d.ts
 # User-uploaded reference clips — never commit; they're personal voice
 # samples the user dropped in via the Design tab's Upload button.
 **/data/presets/user/
+# Reader credentials live here — written by reader_client.set_config().
+# Never commit; bearer tokens must stay local.
+**/data/config.json
 # Also catch the misnested dir pattern outright.
 backend/backend/
 
