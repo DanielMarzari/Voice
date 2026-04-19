@@ -48,3 +48,14 @@ backend/backend/
 .vscode/
 .idea/
 *.swp
+
+# Spike artifacts — large ONNX weights and audio samples don't belong in git.
+# The *.md reports in spikes/ and spikes/results/*.json DO commit.
+spikes/**/*.onnx
+spikes/**/*.onnx_data
+spikes/**/*.wav
+spikes/**/*.mp3
+spikes/**/*.safetensors
+spikes/**/*.pt
+spikes/**/*.ckpt
+spikes/**/artifacts/
