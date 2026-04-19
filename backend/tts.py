@@ -422,13 +422,23 @@ def _resolve_base_reference() -> tuple[str, str]:
 def resolve_preset(preset_id: str) -> tuple[str, str]:
     """Return (ref_audio_path, ref_text) for a base-voice dropdown entry.
 
-    Accepts three namespaces:
+    Accepts four namespaces:
       * "amber" / "cobalt" / "rose" / "slate" — built-in mood presets.
         All share a single reference clip (auto-downloaded / F5 bundled);
         they differ only in slider defaults. Call _resolve_base_reference.
       * "user:<slug>" — user-uploaded reference under data/presets/user/.
         Looks up backend/data/presets/user/<slug>.wav (+ optional .txt).
+      * "deep:<slug>-<shortid>" — a Deep Clone fine-tuned voice. We route
+        through training.resolve_deep_clone() which currently returns the
+        first training segment as the reference clip (until the engines
+        grow a checkpoint-loading hook).
     """
+    if preset_id.startswith("deep:"):
+        # Deferred import — training.py imports nothing heavy, but keeping
+        # this lazy avoids any chance of circular-import headaches.
+        import training  # type: ignore
+        return training.resolve_deep_clone(preset_id)
+
     if preset_id.startswith("user:"):
         slug = preset_id.split(":", 1)[1]
         wav = USER_REF_DIR / f"{slug}.wav"

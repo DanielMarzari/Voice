@@ -33,3 +33,10 @@ TTS>=0.22
 # fails at import time with `ImportError: cannot import name 'BeamSearchScorer'`.
 # 4.36.2 is the last line that stayed fully compatible with TTS 0.22.x.
 transformers==4.36.2
+
+# ---- Deep Clone (Stage 1 dataset prep) ----
+# Whisper is used to transcribe 3-10 s training segments, producing the
+# metadata.csv expected by F5-TTS's finetune_cli.py and XTTS's trainer.
+# faster-whisper ships CTranslate2 wheels that work cleanly on Apple Silicon
+# (no CUDA required); it's ~4x faster than openai-whisper for equal accuracy.
+faster-whisper>=1.0.3

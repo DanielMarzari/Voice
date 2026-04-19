@@ -281,6 +281,95 @@ export async function importVoice(args: {
   return j(await fetch(u("/api/import"), { method: "POST", body: fd }));
 }
 
+/* ------------------------ Deep Clone ------------------------ */
+
+/**
+ * A "Deep Clone" training job — prepared on the backend by segmenting
+ * + transcribing ~30 min of user-provided audio. The heavy lifting
+ * (actual fine-tuning) happens in a shell script the user runs
+ * themselves; the UI polls `status` every 30 s while a job is running.
+ */
+export type DeepCloneStatus =
+  | "prepared"
+  | "training"
+  | "ready"
+  | "failed";
+
+export type DeepCloneManifest = {
+  id: string;
+  name: string;
+  description: string;
+  engine: "f5" | "xtts";
+  created_at: string;
+  segment_count: number;
+  total_duration_s: number;
+  train_script: string;
+  checkpoint_glob: string;
+  status: DeepCloneStatus;
+  error?: string | null;
+  checkpoint_path?: string | null;
+  notes: string[];
+};
+
+export async function prepareDeepClone(args: {
+  name: string;
+  description?: string;
+  engine: "f5" | "xtts";
+  files: File[];
+}): Promise<DeepCloneManifest> {
+  const fd = new FormData();
+  fd.append("name", args.name);
+  if (args.description) fd.append("description", args.description);
+  fd.append("engine", args.engine);
+  for (const f of args.files) fd.append("audio_file", f);
+  return j(await fetch(u("/api/deep-clone/prepare"), { method: "POST", body: fd }));
+}
+
+export async function listDeepCloneTrainings(): Promise<DeepCloneManifest[]> {
+  const d = await j<{ trainings: DeepCloneManifest[] }>(
+    await fetch(u("/api/deep-clone"))
+  );
+  return d.trainings;
+}
+
+export async function getDeepCloneTraining(id: string): Promise<DeepCloneManifest> {
+  return j(await fetch(u(`/api/deep-clone/${encodeURIComponent(id)}`)));
+}
+
+export async function deleteDeepCloneTraining(id: string): Promise<void> {
+  await j(
+    await fetch(u(`/api/deep-clone/${encodeURIComponent(id)}`), {
+      method: "DELETE",
+    })
+  );
+}
+
+export async function getDeepCloneScript(id: string): Promise<string> {
+  const r = await fetch(u(`/api/deep-clone/${encodeURIComponent(id)}/script`));
+  if (!r.ok) {
+    const body = await r.text().catch(() => "");
+    throw new Error(
+      `${r.status} ${r.statusText}${body ? `: ${body.slice(0, 300)}` : ""}`
+    );
+  }
+  return r.text();
+}
+
+export async function registerDeepClone(id: string): Promise<{
+  id: string;
+  name: string;
+  description: string;
+  engine: "f5" | "xtts";
+  checkpoint_path: string;
+  ref_audio_path: string;
+}> {
+  return j(
+    await fetch(u(`/api/deep-clone/${encodeURIComponent(id)}/register`), {
+      method: "POST",
+    })
+  );
+}
+
 /** Preview a designed voice without persisting. Returns a blob object URL. */
 export async function previewDesign(args: {
   baseVoice: string;

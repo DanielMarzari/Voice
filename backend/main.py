@@ -10,6 +10,13 @@ Routes:
   POST /api/design              — persist a designed voice → JSON profile
   POST /api/design/preview      — synth a designed voice without saving → MP3 bytes
   POST /api/import              — store user-provided audio as a voice (no synth)
+  POST /api/deep-clone/prepare  — Stage 1 of deep cloning: segment + transcribe
+  GET  /api/deep-clone          — list prepared training jobs
+  GET  /api/deep-clone/{id}     — single training manifest + live status
+  GET  /api/deep-clone/{id}/script — stream the rendered train.sh as text
+  DELETE /api/deep-clone/{id}   — remove a training job on disk
+  POST /api/deep-clone/{id}/register — promote a ready checkpoint to a deep: voice
+  GET  /api/deep-clones         — list registered deep-clone voices
   GET  /api/profiles            — list local profiles
   GET  /api/profiles/{id}       — fetch one profile
   GET  /api/profiles/{id}/sample — stream the preview MP3
@@ -37,6 +44,7 @@ from pydantic import BaseModel, Field
 
 import profiles
 import reader_client
+import training
 import tts
 
 # Load .env.local from the repo root (one level up from backend/).
@@ -526,6 +534,119 @@ def design_voice(req: DesignRequest, upload: bool = True):
             log.warning("Upload to Reader failed: %s", e)
 
     return _to_response(profile)
+
+
+# ---------------------------------------------------------------------
+# Deep Clone — fine-tune a model on ~30 min of clean speech for
+# ElevenLabs-grade consistency. Two-stage pipeline: Prepare (synchronous
+# segment + transcribe) then Train (out-of-process shell script the user
+# runs themselves).
+# ---------------------------------------------------------------------
+
+
+@app.post("/api/deep-clone/prepare")
+async def deep_clone_prepare(
+    name: str = Form(..., min_length=1, max_length=60),
+    description: str = Form(""),
+    engine: str = Form("f5"),
+    audio_file: list[UploadFile] = File(...),
+):
+    """Stage 1: accept one or more long audio files, concatenate, VAD-split
+    into 3–10 s segments, transcribe each with whisper, and persist to
+    backend/data/training/<id>/. Returns the manifest (includes the path
+    to a rendered train.sh the user runs themselves)."""
+    if engine not in ("f5", "xtts"):
+        raise HTTPException(400, f"engine must be 'f5' or 'xtts', got {engine!r}")
+    if not audio_file:
+        raise HTTPException(400, "at least one audio_file is required")
+
+    blobs: list[bytes] = []
+    total_bytes = 0
+    # 500 MB cap across all files — generous for ~30 min of high-bitrate
+    # audio, but prevents a malformed 2 GB upload from running us out of
+    # RAM (we do decode in-memory).
+    MAX_TOTAL = 500 * 1024 * 1024
+    for upload in audio_file:
+        raw = await upload.read()
+        if not raw:
+            continue
+        total_bytes += len(raw)
+        if total_bytes > MAX_TOTAL:
+            raise HTTPException(413, "total audio too large (max 500 MB combined)")
+        blobs.append(raw)
+
+    if not blobs:
+        raise HTTPException(400, "all uploaded audio_file parts were empty")
+
+    try:
+        manifest = training.prepare_dataset(
+            audio_blobs=blobs,
+            name=name,
+            description=description,
+            engine=engine,  # type: ignore[arg-type]
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        log.exception("deep-clone prep failed")
+        raise HTTPException(500, f"Dataset prep failed: {e}")
+
+    return _manifest_dict(manifest)
+
+
+@app.get("/api/deep-clone")
+def list_deep_clone_jobs():
+    return {"trainings": [_manifest_dict(m) for m in training.list_trainings()]}
+
+
+@app.get("/api/deep-clone/{training_id}")
+def get_deep_clone_job(training_id: str):
+    m = training.get_training(training_id)
+    if m is None:
+        raise HTTPException(404, "Training not found")
+    status = training.training_status(training_id) or {}
+    body = _manifest_dict(m)
+    body["status"] = status.get("status", body.get("status"))
+    body["checkpoint_path"] = status.get("checkpoint_path")
+    return body
+
+
+@app.get("/api/deep-clone/{training_id}/script")
+def get_deep_clone_script(training_id: str):
+    body = training.read_train_script(training_id)
+    if body is None:
+        raise HTTPException(404, "train.sh not found")
+    return Response(content=body, media_type="text/plain")
+
+
+@app.delete("/api/deep-clone/{training_id}")
+def delete_deep_clone_job(training_id: str):
+    if training.delete_training(training_id):
+        return {"deleted": training_id}
+    raise HTTPException(404, "Training not found")
+
+
+@app.post("/api/deep-clone/{training_id}/register")
+def register_deep_clone(training_id: str):
+    """Once train.sh has produced a checkpoint, call this to make the
+    voice show up as `deep:<slug>` in the Design tab's base-voice dropdown."""
+    try:
+        entry = training.register_training(training_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except FileNotFoundError as e:
+        raise HTTPException(404, str(e))
+    return entry
+
+
+@app.get("/api/deep-clones")
+def list_registered_deep_clones():
+    return {"deep_clones": training.list_deep_clones()}
+
+
+def _manifest_dict(m: training.TrainingManifest) -> dict:
+    from dataclasses import asdict
+    return asdict(m)
 
 
 @app.get("/api/profiles")

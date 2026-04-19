@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { getHealth, type Health, type Profile } from "@/lib/api";
 import { CloneTab } from "@/components/CloneTab";
+import { DeepCloneTab } from "@/components/DeepCloneTab";
 import { DesignTab } from "@/components/DesignTab";
 import { ImportTab } from "@/components/ImportTab";
 import { LibraryTab } from "@/components/LibraryTab";
 import { SettingsModal } from "@/components/SettingsModal";
 import { VoiceSphere } from "@/components/VoiceSphere";
 
-type TabKey = "clone" | "design" | "import" | "library";
+type TabKey = "clone" | "design" | "import" | "deep-clone" | "library";
 
 export default function VoiceStudioPage() {
   const [tab, setTab] = useState<TabKey>("clone");
@@ -75,6 +76,7 @@ export default function VoiceStudioPage() {
           <TabBtn active={tab === "clone"} onClick={() => setTab("clone")} label="Clone a voice" />
           <TabBtn active={tab === "design"} onClick={() => setTab("design")} label="Design a voice" />
           <TabBtn active={tab === "import"} onClick={() => setTab("import")} label="Import a voice" />
+          <TabBtn active={tab === "deep-clone"} onClick={() => setTab("deep-clone")} label="Deep Clone" />
           <TabBtn active={tab === "library"} onClick={() => setTab("library")} label="Library" />
         </div>
       </header>
@@ -83,6 +85,7 @@ export default function VoiceStudioPage() {
         {tab === "clone" && <CloneTab onCreated={onCreated} />}
         {tab === "design" && <DesignTab onCreated={onCreated} />}
         {tab === "import" && <ImportTab onCreated={onCreated} />}
+        {tab === "deep-clone" && <DeepCloneTab />}
         {tab === "library" && <LibraryTab refreshKey={libraryKey} />}
       </main>
 
