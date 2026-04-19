@@ -7,36 +7,85 @@
 
 | Spike | Status | Headline number | Go/No-go |
 |-------|--------|-----------------|----------|
-| A — F5 → ONNX | ⬜ not started | — | — |
+| A — ZipVoice-Distill ONNX on CPU | ✅ done | 124 MB INT8 / 472 MB FP32 total; 1.7× real-time on CPU | **GREEN** |
 | B — ORT-Web load + run | ⬜ not started | — | — |
-| C — Vocos → ONNX | ⬜ not started | — | — |
+| C — Vocos → ONNX | ⏸ deferred | ZipVoice embeds its own vocoder; Vocos may not be needed | — |
 | D — Fine-tune timing on T4 | ⬜ not started | — | — |
-| E — Distillation starter survey | ⬜ not started | — | — |
+| E — Distillation starter survey | ✅ done | ZipVoice-Distill obsoletes custom distillation | **GREEN** |
 
-**Overall recommendation:** _(to be filled in after all 5 spikes complete)_
+**Overall recommendation (preliminary, after Spikes A + E):** 🟢 **Strong
+proceed to Phase 1.** The architectural risks Phase 0 was designed to
+surface have mostly resolved in the happy direction: k2-fsa has shipped
+what we were going to build, the ONNX loads cleanly on CPU, download
+budgets are better than planned (124 MB INT8 / 472 MB FP32), and Phase 2
+distillation scope collapses to zero. Remaining risk is Spike B
+(WebGPU in-browser) and Spike D (per-voice fine-tune timing on T4).
 
 ---
 
-## Spike A — F5-TTS → ONNX export
+## Spike A — ZipVoice-Distill ONNX validation (CPU)
 
-**Goal:** export `SWivid/F5-TTS` (335M params) to a single ONNX file, verify
-PyTorch and ORT CPU outputs match on 3 sample prompts within RMS error < 0.05.
+**Goal (revised after Spike E):** validate that k2-fsa's pre-exported
+ZipVoice-Distill ONNX files load and run in ONNX Runtime CPU without
+errors. Original goal was custom F5-TTS export; we pivoted when we
+discovered k2-fsa has already published fully-exported ONNX to
+HuggingFace (`k2-fsa/ZipVoice`, subfolder `zipvoice_distill/`).
 
-**Environment:** _(Colab / Kaggle / Modal, GPU type)_
-**Commit pointer:** _(branch + SHA of the notebook run)_
+**Environment:** Lightning AI Studio (sole-sapphire-nqrv), CPU mode, no
+credits consumed. Ubuntu 24.04, Python 3.12.3, torch 2.4 CPU,
+onnxruntime 1.19.2.
+**Artifact:** `spikes/results/parity_report_lightning.json`
+**Code:** `spikes/spike_a_lightning/spike_a.py`
 
 ### Results
-- Export succeeded: ⬜ yes / ⬜ no
-- ONNX file size: __ MB (target: < 1.5 GB for FP16)
-- PyTorch vs ORT CPU RMS error (3 prompts avg): __
-- Ops that required custom handling: _(rotary emb, scaled_dot_product, etc.)_
-- Artifact location + SHA-256: _(path + hash)_
+
+All 4 ONNX files downloaded from HF, loaded in ORT CPU, forward-passed
+successfully with sensible dummy inputs.
+
+| Model | Size (MB) | Load (s) | Forward (ms) | Status |
+|-------|-----------|----------|--------------|--------|
+| `fm_decoder.onnx` (FP32) | 455.4 | 1.57 | 94 | ✅ |
+| `fm_decoder_int8.onnx` | 118.9 | 1.17 | 67 | ✅ |
+| `text_encoder.onnx` (FP32) | 16.8 | 0.20 | 20 | ✅ |
+| `text_encoder_int8.onnx` | 5.3 | 0.21 | 20 | ✅ |
+
+- Browser download budgets:
+  - **FP32 bundle: 472.2 MB** (fm_decoder + text_encoder)
+  - **INT8 bundle: 124.2 MB** ← **-81% vs F5's 670 MB plan target**
+- CPU inference (one sentence ≈ text_encoder + 4 × fm_decoder at 50-frame batch):
+  - FP32: 395 ms for ~0.5 s audio → **1.3× real-time**
+  - INT8: 289 ms for ~0.5 s audio → **1.7× real-time**
+- Input signatures captured in `parity_report_lightning.json` — match
+  expectations for flow-matching TTS with CFG (`guidance_scale` input)
+  and zero-shot voice cloning (`speech_condition` mel prompt input).
 
 ### Notes
-_(any surprises, work-arounds, follow-up)_
+
+- **Download was 0.2 s the second run** — HF files were already in
+  `~/.cache/huggingface/` from the first (failed) run. Lightning's
+  persistent 100 GB disk means Spike B can reuse them without
+  re-downloading.
+- k2-fsa split the model into two ONNX files (text_encoder + fm_decoder)
+  instead of one. This matches how ORT-Web recommends staging large
+  models — load the smaller text_encoder first, defer the bigger
+  fm_decoder until first synth. Good for UX.
+- ONNX uses opset that ORT 1.19 handles fine. No custom ops warning,
+  no unsupported-op errors.
+- INT8 is CPU-quantized (QLinear ops). On WebGPU the INT8 benefit is
+  less pronounced because WebGPU doesn't do INT8 as efficiently as
+  modern CPU AVX — we'll likely ship FP16 for web. Spike B will benchmark.
 
 ### Go/No-go
-_(PASS / FAIL / PIVOT — e.g. "PIVOT to Kokoro-82M if F5 DiT rotary won't export")_
+
+**✅ GREEN — PASS.** Proceed to Spike B using the exact same artifacts
+from `/teamspace/studios/this_studio/spike-artifacts/zipvoice_distill/`
+(already on the Lightning Studio's persistent disk).
+
+**Phase 2 distillation scope collapses to near-zero** because k2-fsa
+already did the distillation for us. Phase 2 is now "optionally
+fine-tune ZipVoice-Distill per voice" rather than "research-grade
+consistency/rectified-flow distillation of F5." This is the biggest
+scope reduction the spikes have produced.
 
 ---
 

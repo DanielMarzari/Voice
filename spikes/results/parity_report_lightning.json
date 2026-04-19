@@ -1,0 +1,368 @@
+{
+  "spike": "A",
+  "variant": "lightning-cpu-prebuilt-onnx",
+  "generated_at": "2026-04-19T05:18:13.998686Z",
+  "environment": {
+    "python": "3.12.3",
+    "platform": "Linux-6.8.0-1024-aws-x86_64-with-glibc2.39",
+    "onnxruntime": "1.19.2",
+    "providers": [
+      "AzureExecutionProvider",
+      "CPUExecutionProvider"
+    ]
+  },
+  "source": {
+    "hf_repo": "k2-fsa/ZipVoice",
+    "hf_folder": "zipvoice_distill",
+    "note": "Using k2-fsa's pre-exported ONNX \u2014 no custom export needed."
+  },
+  "models": {
+    "fm_decoder_fp32": {
+      "file": "fm_decoder.onnx",
+      "size_mb": 455.4,
+      "sha256_prefix": "4510d4f5f049f14e",
+      "load_s": 1.57,
+      "session": {
+        "inputs": [
+          {
+            "name": "t",
+            "type": "tensor(float)",
+            "shape": []
+          },
+          {
+            "name": "x",
+            "type": "tensor(float)",
+            "shape": [
+              "N",
+              "T",
+              100
+            ]
+          },
+          {
+            "name": "text_condition",
+            "type": "tensor(float)",
+            "shape": [
+              "N",
+              "T",
+              100
+            ]
+          },
+          {
+            "name": "speech_condition",
+            "type": "tensor(float)",
+            "shape": [
+              "N",
+              "T",
+              100
+            ]
+          },
+          {
+            "name": "guidance_scale",
+            "type": "tensor(float)",
+            "shape": []
+          }
+        ],
+        "outputs": [
+          {
+            "name": "v",
+            "type": "tensor(float)",
+            "shape": [
+              "N",
+              "T",
+              100
+            ]
+          }
+        ],
+        "providers": [
+          "CPUExecutionProvider"
+        ]
+      },
+      "forward": {
+        "status": "ok",
+        "wall_clock_s": 0.09369611740112305,
+        "input_shapes": {
+          "t": [],
+          "x": [
+            1,
+            50,
+            100
+          ],
+          "text_condition": [
+            1,
+            50,
+            100
+          ],
+          "speech_condition": [
+            1,
+            50,
+            100
+          ],
+          "guidance_scale": []
+        },
+        "output_shapes": {
+          "v": [
+            1,
+            50,
+            100
+          ]
+        },
+        "output_dtypes": {
+          "v": "float32"
+        }
+      }
+    },
+    "fm_decoder_int8": {
+      "file": "fm_decoder_int8.onnx",
+      "size_mb": 118.9,
+      "sha256_prefix": "3cc2e08a96610d7e",
+      "load_s": 1.17,
+      "session": {
+        "inputs": [
+          {
+            "name": "t",
+            "type": "tensor(float)",
+            "shape": []
+          },
+          {
+            "name": "x",
+            "type": "tensor(float)",
+            "shape": [
+              "N",
+              "T",
+              100
+            ]
+          },
+          {
+            "name": "text_condition",
+            "type": "tensor(float)",
+            "shape": [
+              "N",
+              "T",
+              100
+            ]
+          },
+          {
+            "name": "speech_condition",
+            "type": "tensor(float)",
+            "shape": [
+              "N",
+              "T",
+              100
+            ]
+          },
+          {
+            "name": "guidance_scale",
+            "type": "tensor(float)",
+            "shape": []
+          }
+        ],
+        "outputs": [
+          {
+            "name": "v",
+            "type": "tensor(float)",
+            "shape": [
+              "N",
+              "T",
+              100
+            ]
+          }
+        ],
+        "providers": [
+          "CPUExecutionProvider"
+        ]
+      },
+      "forward": {
+        "status": "ok",
+        "wall_clock_s": 0.06721687316894531,
+        "input_shapes": {
+          "t": [],
+          "x": [
+            1,
+            50,
+            100
+          ],
+          "text_condition": [
+            1,
+            50,
+            100
+          ],
+          "speech_condition": [
+            1,
+            50,
+            100
+          ],
+          "guidance_scale": []
+        },
+        "output_shapes": {
+          "v": [
+            1,
+            50,
+            100
+          ]
+        },
+        "output_dtypes": {
+          "v": "float32"
+        }
+      }
+    },
+    "text_encoder_fp32": {
+      "file": "text_encoder.onnx",
+      "size_mb": 16.8,
+      "sha256_prefix": "495eca2d5f8a911f",
+      "load_s": 0.2,
+      "session": {
+        "inputs": [
+          {
+            "name": "tokens",
+            "type": "tensor(int64)",
+            "shape": [
+              "N",
+              "T"
+            ]
+          },
+          {
+            "name": "prompt_tokens",
+            "type": "tensor(int64)",
+            "shape": [
+              "N",
+              "T"
+            ]
+          },
+          {
+            "name": "prompt_features_len",
+            "type": "tensor(int64)",
+            "shape": []
+          },
+          {
+            "name": "speed",
+            "type": "tensor(float)",
+            "shape": []
+          }
+        ],
+        "outputs": [
+          {
+            "name": "text_condition",
+            "type": "tensor(float)",
+            "shape": [
+              "N",
+              "T",
+              "Concattext_condition_dim_2"
+            ]
+          }
+        ],
+        "providers": [
+          "CPUExecutionProvider"
+        ]
+      },
+      "forward": {
+        "status": "ok",
+        "wall_clock_s": 0.019774675369262695,
+        "input_shapes": {
+          "tokens": [
+            1,
+            50
+          ],
+          "prompt_tokens": [
+            1,
+            50
+          ],
+          "prompt_features_len": [],
+          "speed": []
+        },
+        "output_shapes": {
+          "text_condition": [
+            1,
+            61,
+            100
+          ]
+        },
+        "output_dtypes": {
+          "text_condition": "float32"
+        }
+      }
+    },
+    "text_encoder_int8": {
+      "file": "text_encoder_int8.onnx",
+      "size_mb": 5.3,
+      "sha256_prefix": "f2de9a761a85e5dd",
+      "load_s": 0.21,
+      "session": {
+        "inputs": [
+          {
+            "name": "tokens",
+            "type": "tensor(int64)",
+            "shape": [
+              "N",
+              "T"
+            ]
+          },
+          {
+            "name": "prompt_tokens",
+            "type": "tensor(int64)",
+            "shape": [
+              "N",
+              "T"
+            ]
+          },
+          {
+            "name": "prompt_features_len",
+            "type": "tensor(int64)",
+            "shape": []
+          },
+          {
+            "name": "speed",
+            "type": "tensor(float)",
+            "shape": []
+          }
+        ],
+        "outputs": [
+          {
+            "name": "text_condition",
+            "type": "tensor(float)",
+            "shape": [
+              "N",
+              "T",
+              "Concattext_condition_dim_2"
+            ]
+          }
+        ],
+        "providers": [
+          "CPUExecutionProvider"
+        ]
+      },
+      "forward": {
+        "status": "ok",
+        "wall_clock_s": 0.020403385162353516,
+        "input_shapes": {
+          "tokens": [
+            1,
+            50
+          ],
+          "prompt_tokens": [
+            1,
+            50
+          ],
+          "prompt_features_len": [],
+          "speed": []
+        },
+        "output_shapes": {
+          "text_condition": [
+            1,
+            61,
+            100
+          ]
+        },
+        "output_dtypes": {
+          "text_condition": "float32"
+        }
+      }
+    }
+  },
+  "summary": {
+    "all_models_load": true,
+    "all_forward_pass": true,
+    "fp32_total_mb": 472.2,
+    "int8_total_mb": 124.2,
+    "verdict": "GREEN"
+  }
+}
