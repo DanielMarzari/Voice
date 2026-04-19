@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   DEFAULT_PREVIEW_TEXT,
-  deleteReference,
   designVoice,
   listEngines,
   listPresets,
@@ -20,6 +19,7 @@ import {
 } from "@/lib/api";
 import { EnginePicker, useEngineChoice } from "@/components/EnginePicker";
 import { GenerationProgress } from "@/components/GenerationProgress";
+import { ManageReferencesModal } from "@/components/ManageReferencesModal";
 import { MoodPicker } from "@/components/MoodPicker";
 import { SessionHistory, type SessionItem } from "@/components/SessionHistory";
 import { UploadReferenceModal } from "@/components/UploadReferenceModal";
@@ -83,6 +83,7 @@ export function DesignTab({ onCreated }: Props) {
   // User-uploaded reference clips (the "bring your own voice" path).
   const [references, setReferences] = useState<Reference[]>([]);
   const [refModalOpen, setRefModalOpen] = useState(false);
+  const [manageOpen, setManageOpen] = useState(false);
 
   useEffect(() => {
     listPresets()
@@ -112,22 +113,15 @@ export function DesignTab({ onCreated }: Props) {
     setBaseVoice(added.id);
   }
 
-  async function handleReferenceDelete(refId: string) {
-    const ref = references.find((r) => r.id === refId);
-    if (!ref) return;
-    const confirmMsg = `Delete "${ref.name}"?\n\nThis removes the reference clip from data/presets/user/ and the dropdown. Voices you already saved using it are unaffected.`;
-    if (!confirm(confirmMsg)) return;
-    // ref.id is "user:<slug>" — strip the prefix for the DELETE call.
-    const slug = refId.startsWith("user:") ? refId.slice(5) : refId;
-    try {
-      await deleteReference(slug);
-      setReferences((r) => r.filter((x) => x.id !== refId));
-      // If the deleted ref was the active base voice, revert to the first preset.
-      if (baseVoice === refId && presets.length > 0) {
-        selectPreset(presets[0].id);
-      }
-    } catch (e) {
-      alert((e as Error).message);
+  function handleReferencesChanged(next: Reference[]) {
+    setReferences(next);
+    // If the active base voice just got deleted, revert to the first preset.
+    if (
+      baseVoice.startsWith("user:") &&
+      !next.some((r) => r.id === baseVoice) &&
+      presets.length > 0
+    ) {
+      selectPreset(presets[0].id);
     }
   }
 
@@ -391,15 +385,14 @@ export function DesignTab({ onCreated }: Props) {
             >
               ⇡ Upload
             </button>
-            {baseVoice.startsWith("user:") && (
+            {references.length > 0 && (
               <button
                 type="button"
-                className="btn !text-red-500 !px-2"
-                onClick={() => handleReferenceDelete(baseVoice)}
-                title="Delete this uploaded reference"
-                aria-label="Delete reference"
+                className="btn"
+                onClick={() => setManageOpen(true)}
+                title="Manage your uploaded reference voices"
               >
-                ✕
+                Manage
               </button>
             )}
           </div>
@@ -550,6 +543,12 @@ export function DesignTab({ onCreated }: Props) {
         open={refModalOpen}
         onClose={() => setRefModalOpen(false)}
         onSubmit={handleReferenceUpload}
+      />
+      <ManageReferencesModal
+        open={manageOpen}
+        onClose={() => setManageOpen(false)}
+        references={references}
+        onChange={handleReferencesChanged}
       />
     </div>
   );

@@ -23,7 +23,7 @@ export const DEFAULT_PREVIEW_TEXT =
   "Hi there! I'm your new voice. Do I sound natural, clear, and " +
   "expressive? There's plenty more where this came from.";
 
-export type VoiceKind = "cloned" | "designed";
+export type VoiceKind = "cloned" | "designed" | "uploaded";
 
 export type Profile = {
   id: string;
