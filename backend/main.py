@@ -22,6 +22,10 @@ Routes:
   GET  /api/profiles/{id}/sample — stream the preview MP3
   DELETE /api/profiles/{id}     — delete local + remote
   POST /api/profiles/{id}/sync  — re-push to Reader if missing there
+  POST /api/synthesize          — generate audio for arbitrary text with
+                                  a saved voice (this is what Reader's
+                                  chunked read-aloud hits)
+  GET  /api/synthesize/voices   — voices Reader can use for synthesis
 
 All routes bind to 127.0.0.1 only via start.sh. CORS open to localhost
 for the Next.js frontend.
@@ -59,10 +63,20 @@ log = logging.getLogger("voice-studio")
 
 app = FastAPI(title="Voice Studio", version="0.1.0")
 
-# Next.js dev server talks to us from localhost:3007.
+# CORS is deliberately wide-open for local/known origins:
+#   - localhost:3007 → the Voice Studio frontend itself
+#   - localhost:3006 → Reader running in dev next to us
+#   - reader.danmarzari.com → Reader's deployed UI. When the user is on
+#     their Mac reading from reader.danmarzari.com and Voice Studio is up,
+#     Reader's browser fetches this backend directly for TTS. Browsers
+#     allow HTTPS → http://localhost cross-origin as long as CORS matches.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3007", "http://127.0.0.1:3007"],
+    allow_origins=[
+        "http://localhost:3007", "http://127.0.0.1:3007",
+        "http://localhost:3006", "http://127.0.0.1:3006",
+        "https://reader.danmarzari.com",
+    ],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -699,3 +713,140 @@ def sync_profile(profile_id: str):
     p.synced = True
     profiles.save(p)
     return _to_response(p)
+
+
+# ---------------------------------------------------------------------
+# Synthesize arbitrary text with a saved profile. This is the entry point
+# Reader hits for read-aloud — it's self-hosted TTS using whichever
+# engine the profile was saved with (F5 or XTTS), no external APIs.
+# ---------------------------------------------------------------------
+
+
+class SynthesisRequest(BaseModel):
+    voice_id: str = Field(..., min_length=1)
+    text: str = Field(..., min_length=1, max_length=2000)
+    # Speechify-style context hints. F5 and XTTS don't expose prev/next text
+    # fields the way ElevenLabs does, so these are currently informational
+    # (we log them and they'd be useful for a future prepend/strip trick to
+    # smooth chunk boundaries). Accepting them keeps Reader's client code
+    # engine-agnostic.
+    previous_text: Optional[str] = None
+    next_text: Optional[str] = None
+    speed: float = Field(1.0, ge=0.5, le=2.5)
+    language: str = Field("en", min_length=2, max_length=5)
+
+
+def _resolve_voice_reference(profile: profiles.VoiceProfile) -> tuple[str, Optional[str], Optional[str]]:
+    """Return (ref_audio_path, ref_text, speaker_name) for a saved profile.
+
+    - Cloned voices: use the original source.<ext> clip from the profile dir.
+    - Designed voices: re-resolve the base_voice preset (same clip used at
+      design time; slider params re-applied below).
+    - Uploaded voices: we don't synthesize new text for these; caller
+      should handle the 400 before calling us.
+    """
+    if profile.kind == "cloned":
+        # Clone stored source.wav/.mp3/.m4a in its dir. Find whichever is there.
+        dir_ = profile.dir()
+        sources = [p for p in dir_.iterdir() if p.stem == "source" and p.is_file()]
+        if not sources:
+            raise HTTPException(
+                500,
+                f"Cloned profile {profile.id} missing source audio — delete + re-clone.",
+            )
+        return str(sources[0]), None, None
+
+    if profile.kind == "designed":
+        design = profile.design or {}
+        speaker_name = design.get("speaker_name")  # XTTS-only, optional
+        base_voice = design.get("base_voice")
+        if not base_voice:
+            raise HTTPException(500, "Designed profile missing design.base_voice")
+        ref_path, ref_text = tts.resolve_preset(base_voice)
+        return ref_path, ref_text, speaker_name
+
+    raise HTTPException(
+        400,
+        f"Voice kind '{profile.kind}' can't synthesize new text. "
+        f"Imported voices only hold a static clip.",
+    )
+
+
+@app.post("/api/synthesize")
+def synthesize(req: SynthesisRequest):
+    """Generate audio for `text` using a saved voice profile. Returns
+    audio/mpeg bytes. Called by Reader's chunked streaming player when
+    the user picks the 'Voice Studio' engine."""
+    profile = profiles.load(req.voice_id)
+    if profile is None:
+        raise HTTPException(404, f"No voice profile {req.voice_id}")
+
+    try:
+        ref_path, ref_text, speaker_name = _resolve_voice_reference(profile)
+    except HTTPException:
+        raise
+
+    # Engine is whatever the profile was created with ("f5" or "xtts").
+    # Designed profiles persist their engine; cloned ones do too. Fall
+    # back to the default engine if somehow missing (shouldn't happen).
+    engine_id = profile.engine or tts.DEFAULT_ENGINE
+    # Normalize legacy engine strings like "f5-tts" → "f5".
+    engine_id = {"f5-tts": "f5"}.get(engine_id, engine_id)
+
+    try:
+        engine = tts.get_engine(engine_id)
+    except ValueError as e:
+        raise HTTPException(500, f"Engine '{engine_id}' not registered: {e}")
+
+    # Honor designed-voice slider params (speed/pitch). If the client sent
+    # a speed override, the client wins; otherwise use the profile's saved
+    # speed. For pitch we honor the profile value and apply post-synth.
+    design = profile.design or {}
+    effective_speed = req.speed if req.speed and req.speed != 1.0 else float(design.get("speed", 1.0))
+    pitch_semitones = float(design.get("pitch", 0.0))
+
+    log.info(
+        "synth: voice=%s engine=%s kind=%s speed=%.2f pitch=%.2f text_len=%d%s",
+        req.voice_id, engine_id, profile.kind, effective_speed, pitch_semitones,
+        len(req.text),
+        f" prev={len(req.previous_text)}" if req.previous_text else "",
+    )
+
+    try:
+        result = engine.synthesize(
+            text=req.text,
+            ref_audio_path=ref_path,
+            ref_text=ref_text,
+            speed=effective_speed,
+            language=req.language,
+            speaker_name=speaker_name,
+        )
+        if abs(pitch_semitones) > 0.01:
+            result = tts.pitch_shift(result, pitch_semitones)
+        mp3 = tts.encode_mp3(result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.exception("synthesize failed")
+        raise HTTPException(500, f"Synthesis failed: {e}")
+
+    return Response(content=mp3, media_type="audio/mpeg")
+
+
+@app.get("/api/synthesize/voices")
+def list_synthesize_voices():
+    """Voices that can synthesize new text (cloned + designed). Imports
+    are excluded — they're static audio clips with no engine to re-invoke.
+    Reader hits this to populate its voice picker when the 'Voice Studio'
+    engine is selected."""
+    out = []
+    for p in profiles.list_all():
+        if p.kind == "uploaded":
+            continue
+        out.append({
+            "id": p.id,
+            "name": p.name,
+            "kind": p.kind,
+            "engine": p.engine,
+        })
+    return {"voices": out}
