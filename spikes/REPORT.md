@@ -9,7 +9,7 @@
 |-------|--------|-----------------|----------|
 | A — ZipVoice-Distill ONNX on CPU | ✅ done | 124 MB INT8 / 472 MB FP32 total; 1.7× real-time on CPU | **GREEN** |
 | B — ORT-Web in Chrome | ✅ done | WASM: 0.57–0.59× RT single-threaded; WebGPU: bug-blocked | **YELLOW→GREEN** |
-| C — Vocos → ONNX | ⏸ deferred | Needed as a separate `.onnx` artifact for browser playback; bundled with the zipvoice Python pkg but not yet in the HF ONNX folder — Phase 3 will export | — |
+| C — Vocos → ONNX | ✅ closed via Phase 1 WS2 | Used [wetdog/vocos-mel-24khz-onnx](https://huggingface.co/wetdog/vocos-mel-24khz-onnx); 51.6 MB FP32 / 25.9 MB FP16; parity RMS 0.0 / 6.5e-5 vs PyTorch | **GREEN** |
 | D — Zero-shot voice cloning | ✅ done (reframed) | GREEN with ≥10 s prompts; **Phase 2 fine-tuning deleted** | **GREEN** |
 | E — Distillation starter survey | ✅ done | ZipVoice-Distill obsoletes custom distillation | **GREEN** |
 
@@ -202,18 +202,41 @@ WASM; WebGPU fix is a parallel workstream that doesn't block shipping.
 
 ## Spike C — Vocos → ONNX export
 
-**Goal:** same process as Spike A, for `charactr/vocos-mel-24khz` vocoder.
+**Status:** ✅ closed via Phase 1 Workstream 2. See
+`backend/scripts/export_vocos.py` + `backend/data/models/vocos_meta.json`.
 
-**Environment:**
-**Commit pointer:**
+**Resolution path:** we didn't export Vocos ourselves. Vocos's
+`ISTFTHead` uses `torch.istft` on complex tensors, which neither
+PyTorch exporter handles cleanly (legacy errors on the complex
+number type; dynamo mangles the graph into an ORT-incompatible
+shape). More fundamentally, **ONNX has no iSTFT operator at all**.
+
+The vocos ecosystem settled on a standard split: ONNX produces
+`(mag, cos(phase), sin(phase))` spectrograms; iSTFT runs outside
+ONNX. The canonical pre-exported artifact lives at
+[wetdog/vocos-mel-24khz-onnx](https://huggingface.co/wetdog/vocos-mel-24khz-onnx).
+
+We download it via `backend/scripts/export_vocos.py`, verify its
+SHA-256, FP16-convert, and run end-to-end parity against PyTorch
+Vocos (same HF weights). The iSTFT step uses `torch.istft` for
+parity; Phase 3 ports this ~20 lines of overlap-add to JS.
 
 ### Results
-- Export succeeded: ⬜
-- ONNX size: __ MB (target < 100 MB)
-- PyTorch vs ORT CPU RMS error: __
-- Artifact SHA-256:
+
+- **FP32**: 51.6 MB, SHA-256 `a84c58728a769e…`, parity **max RMS 0.0**
+  vs PyTorch Vocos. Byte-identical.
+- **FP16**: 25.9 MB, SHA-256 `0d03bb5c133540…`, parity max RMS 6.5e-5
+  — below audible threshold by orders of magnitude.
+
+Deployment budget for the full browser pipeline:
+- text_encoder (INT8) + fm_decoder (INT8) + vocos (FP16) ≈ **150 MB**
+- text_encoder (FP32) + fm_decoder (FP32) + vocos (FP32) ≈ **525 MB**
 
 ### Go/No-go
+
+**🟢 GREEN**. Single fetch-and-validate script produces the
+shippable artifact. Phase 3's client needs a JS iSTFT (~20 lines of
+overlap-add) which is a well-documented algorithm.
 
 ---
 

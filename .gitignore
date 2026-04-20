@@ -24,7 +24,17 @@ next-env.d.ts
 # launched from the backend/ dir with a relative HF_HOME) are also ignored.
 **/data/profiles/
 **/data/cache/
-**/data/models/
+# Model artifacts: heavy binaries stay local, small metadata JSONs commit.
+# Listing extensions individually (instead of `**/data/models/`) so that
+# files like vocos_meta.json inside the dir can be tracked — git's
+# gitignore semantics don't let a `!` exception re-include a file whose
+# parent directory was already matched by a broader rule.
+**/data/models/*.onnx
+**/data/models/*.onnx_data
+**/data/models/*.safetensors
+**/data/models/*.pt
+**/data/models/*.ckpt
+**/data/models/*.bin
 # User-uploaded reference clips — never commit; they're personal voice
 # samples the user dropped in via the Design tab's Upload button.
 **/data/presets/user/
