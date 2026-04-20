@@ -155,9 +155,19 @@ export function LibraryTab({ refreshKey }: Props) {
                   ? "Cloned"
                   : p.kind === "uploaded"
                   ? "Imported"
-                  : "Designed"}{" "}
-                · {p.synced ? "synced" : "local only"}
+                  : "Designed"}
+                {p.duration_s != null && ` · ${p.duration_s.toFixed(0)}s`}
+                {" · "}
+                {p.synced ? "synced" : "local only"}
               </div>
+              {p.prompt_text && (
+                <div
+                  className="text-[11px] text-[color:var(--muted)] italic mt-1.5 line-clamp-2"
+                  title={p.prompt_text}
+                >
+                  &ldquo;{p.prompt_text}&rdquo;
+                </div>
+              )}
             </div>
             {playing === p.id && (
               <audio
