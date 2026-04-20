@@ -9,22 +9,52 @@
 |-------|--------|-----------------|----------|
 | A — ZipVoice-Distill ONNX on CPU | ✅ done | 124 MB INT8 / 472 MB FP32 total; 1.7× real-time on CPU | **GREEN** |
 | B — ORT-Web in Chrome | ✅ done | WASM: 0.57–0.59× RT single-threaded; WebGPU: bug-blocked | **YELLOW→GREEN** |
-| C — Vocos → ONNX | ⏸ deferred | ZipVoice embeds its own vocoder; Vocos may not be needed | — |
-| D — Fine-tune timing on T4 | ⬜ not started | — | — |
+| C — Vocos → ONNX | ⏸ deferred | Needed as a separate `.onnx` artifact for browser playback; bundled with the zipvoice Python pkg but not yet in the HF ONNX folder — Phase 3 will export | — |
+| D — Zero-shot voice cloning | ✅ done (reframed) | GREEN with ≥10 s prompts; **Phase 2 fine-tuning deleted** | **GREEN** |
 | E — Distillation starter survey | ✅ done | ZipVoice-Distill obsoletes custom distillation | **GREEN** |
 
-**Overall recommendation (after Spikes A + B + E):** 🟢 **Strong
-proceed to Phase 1.** Three of four high-risk spikes now closed with
-concrete numbers: k2-fsa pre-exported our base model so distillation
-is unnecessary (E), the ONNX loads and runs cleanly on CPU (A), and
-the same ONNX runs end-to-end in Chrome within a second on single-
-threaded WASM (B). Phase 1's training infrastructure is unblocked.
-Remaining open risk is Spike D (per-voice fine-tune timing on T4);
-Spike C (Vocos) is deferred as likely unnecessary.
+**Overall recommendation (after all 5 spikes closed):** 🟢 **Strong
+proceed to Phase 1, with significantly reduced scope.** All five
+architectural risks Phase 0 was designed to surface have resolved
+GREEN or YELLOW-GREEN:
 
-Deployment shape (from B's numbers): ship **INT8 + WASM + COOP/COEP**
-initially (~2× real-time), keep WebGPU as an in-progress perf path
-for the ORT-Web team to fix upstream.
+- **E** — k2-fsa pre-exported our base model. No custom distillation
+  needed.
+- **A** — ONNX loads and runs cleanly on CPU at 1.7× real-time.
+- **B** — same ONNX runs end-to-end in Chrome desktop via WASM
+  (0.57–0.59× single-threaded → ~2× real-time multi-threaded).
+  WebGPU hits an ORT-Web kernel bug; not blocking.
+- **D** — **ZipVoice zero-shot is GREEN with ≥10-second prompt
+  clips.** Dan listened to 3 voices (Alex 6.5s, Marcel 6.1s, Felix
+  8.3s). Felix was "near perfect"; shorter prompts showed degradation
+  but the same identity transfer. **Phase 2 (per-voice fine-tuning)
+  collapses to zero**.
+- **C** — deferred; Vocos ONNX is bundled with the zipvoice Python
+  package but not in k2-fsa's HF ONNX folder. Phase 3 will export it
+  as a one-off using the existing vocos Python library.
+
+**Deployment shape:** ship **INT8 + WASM + COOP/COEP** initially
+(~2× real-time from Spike B's numbers). Voice Studio's Clone tab
+enforces **≥10 s prompts + auto-transcript via Whisper** (already
+installed in backend) and uploads the profile with no training step.
+WebGPU stays as an in-progress perf workstream for ORT-Web to fix
+upstream.
+
+**Phase 1 scope reduction** (vs the plan at
+`/Users/dmarzari/.claude/plans/enumerated-leaping-newell.md`):
+- The `training_pipeline/` package (backend-agnostic `train.py` +
+  per-platform runners for Colab/Kaggle/Modal/Lightning): **deleted
+  from shipping path**. May revisit only if we ever want per-voice
+  quality above the zero-shot baseline.
+- `backend/training.py` Deep Clone scaffold: park as a future feature.
+- `runners/*` directory: never built.
+- Phase 2 (originally "4–8 weeks of flow-matching distillation"):
+  **deleted**.
+
+What Phase 1 actually is now: (a) tighten Voice Studio's Clone tab
+(≥10 s prompt enforcement + Whisper auto-transcribe + upload to
+Reader with profile metadata), and (b) Vocos ONNX export (~1 day).
+Phase 3 (Reader browser inference) becomes the main workstream.
 
 ---
 
@@ -187,26 +217,71 @@ WASM; WebGPU fix is a parallel workstream that doesn't block shipping.
 
 ---
 
-## Spike D — F5 fine-tune timing on T4
+## Spike D — Zero-shot voice cloning quality test
 
-**Goal:** fine-tune F5 teacher on ~10 min of reference audio on a free-tier
-GPU. Measure wall-clock to reasonable convergence (MCD stabilizing).
+**Goal (reframed):** the original goal was fine-tune timing on a T4
+GPU, sizing Phase 2's training infrastructure. After Spike E
+identified ZipVoice-Distill and noted it supports zero-shot voice
+cloning from a prompt clip, we reframed to answer the upstream
+question: **does zero-shot sound good enough to ship without fine-
+tuning?**
 
-**Environment:** _(Colab free / Pro, Kaggle free, GPU model)_
+**Environment:** Lightning AI Studio sole-sapphire-nqrv on CPU mode
+(no credits), full ZipVoice Python pipeline (phonemize → ONNX → Vocos
+→ WAV), default settings (8 NFE, guidance 3.0).
+**Artifacts:** `spikes/spike_d_zero_shot/outputs/*.wav` (11 WAVs,
+3.3 MB total) + `spikes/results/spike_d_zero_shot_results.json`
+
+### Method
+
+Three voice prompts × 3 test sentences each = 9 zero-shot generations.
+Test sentences were identical across voices for direct A/B comparison.
+Whisper (base model) auto-transcribed each prompt. No fine-tuning, no
+warm-up, no hyperparameter tweaks.
 
 ### Results
-- Reference audio: __ minutes / __ segments / __ MB
-- Checkpoint interval: every __ steps
-- Wall-clock to convergence criterion: __ hours
-- Number of session restarts required: __
-- Final loss: __
-- Fits single free-tier session (9h Kaggle / 12h Colab)? ⬜ yes / ⬜ no
 
-### Notes
-_(OOM? Any hyperparameter tweaks needed beyond defaults?)_
+| Voice | Prompt | Identity capture | Acoustic quality | Dan verdict |
+|-------|--------|------------------|------------------|-------------|
+| Alex   | 6.5 s (French-English) | Correct tone + accent | "Worse microphone" artifacts, some reverb | Almost-GREEN |
+| Marcel | 6.1 s (strong French) | Recognizable but degraded | Similar artifacts | YELLOW |
+| Felix  | 8.3 s (British RP) | **Near perfect**, RP vowels carry cleanly | **Clean** | **GREEN** |
+
+**Headline finding:** quality scales with prompt length. Felix's 1.7
+extra seconds of prompt over Alex was the difference between
+"ship-ready" and "noticeably degraded." Dan's direct quote:
+
+> _"Felix is GREEN and near perfect; his was the longest sample
+> (8 seconds); the others were 7 and 6. I'd say with a longer sample,
+> the voices would probably be ready to go with minimal if any
+> editing."_
+
+### Timings (informational)
+
+0.15–0.34× real-time on Lightning's CPU through the full Python
+pipeline. Not relevant to ship architecture — browser runs on the
+user's hardware. Included for completeness; see
+`spikes/spike_d_zero_shot/README.md` for the per-sentence breakdown.
 
 ### Go/No-go
-_(PASS if < 12 h on T4; PARTIAL if only fits on Colab Pro / A100)_
+
+**🟢 GREEN — PASS** with a product constraint: Voice Studio must
+enforce **≥10 s prompts + clean speech + auto-transcript via Whisper**
+at upload time.
+
+### Implications for the plan
+
+- **Phase 2 (per-voice fine-tuning, 4–8 weeks in the original plan)
+  is deleted from the shipping path.**
+- Phase 1's `training_pipeline/` package, runners, and
+  `backend/training.py` Deep Clone scaffold: all dropped.
+- Phase 1's real scope becomes: (a) tighten Voice Studio's Clone tab
+  (length gate + Whisper auto-transcribe + upload flow), (b) Vocos
+  ONNX export as a one-off.
+- Fine-tune timing remains unmeasured. We don't need the number
+  because we don't need the pipeline. If users report voices that
+  zero-shot can't handle (heavy accents, non-English, extreme out-of-
+  distribution), we re-open Phase 2 scoped to just those cases.
 
 ---
 
@@ -239,6 +314,18 @@ emb issue, solution is opset 18")_
 
 ## Decision
 
-**Proceed to Phase 1?** _(yes / no / yes with scope change)_
+**Proceed to Phase 1?** ✅ **YES, with major scope reduction.**
 
-_(signed + date)_
+Phase 2 (per-voice fine-tuning) and its entire training-infrastructure
+sub-plan is deleted from the shipping path after Spike D's finding
+that ZipVoice zero-shot is GREEN with ≥10-second prompts. Phase 1's
+scope compresses to two small pieces:
+
+1. Voice Studio Clone tab gate: enforce ≥10s prompt + auto-Whisper
+   transcribe + upload profile to Reader (no training step).
+2. Vocos ONNX export (~1 day) so Phase 3's browser pipeline has the
+   mel-to-audio piece.
+
+Phase 3 (Reader client rewrite) becomes the main workstream.
+
+Decision signed 2026-04-20 on branch `phase-0-spikes`.
