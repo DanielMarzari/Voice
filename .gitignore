@@ -48,3 +48,19 @@ backend/backend/
 .vscode/
 .idea/
 *.swp
+
+# Spike artifacts — large ONNX weights and audio samples don't belong in git.
+# The *.md reports in spikes/ and spikes/results/*.json DO commit.
+spikes/**/*.onnx
+spikes/**/*.onnx_data
+spikes/**/*.wav
+spikes/**/*.mp3
+spikes/**/*.safetensors
+spikes/**/*.pt
+spikes/**/*.ckpt
+spikes/**/artifacts/
+
+# Exception: Spike D zero-shot outputs are small (~1.6 MB total across 11
+# WAVs) and are the primary artifact of the spike — the subjective quality
+# verdict is only reproducible if you can listen to them. Keep them.
+!spikes/spike_d_zero_shot/outputs/*.wav

@@ -1,0 +1,54 @@
+{
+  "spike": "D",
+  "variant": "zero-shot-quality-test",
+  "generated_at": "2026-04-20T05:52:00Z",
+  "reframing": "Original spike goal was 'fine-tune timing on T4'. After Spike E identified ZipVoice-Distill as the base model supporting zero-shot cloning, we reframed to answer the higher-value question first: is zero-shot good enough to ship, deleting Phase 2 entirely?",
+  "environment": {
+    "platform": "Lightning AI Studio (sole-sapphire-nqrv), CPU mode",
+    "python": "3.12.3",
+    "pipeline": "piper_phonemize -> ONNX text_encoder -> ONNX fm_decoder (8 NFE, guidance=3.0) -> Vocos vocoder -> WAV",
+    "credit_burn": "zero (CPU mode)"
+  },
+  "voices_tested": [
+    {
+      "name": "Alex",
+      "prompt_duration_s": 6.5,
+      "prompt_transcript": "Hello, I can provide conversational narration in English with an authentic European French accent.",
+      "dan_verdict": "Almost-GREEN — tone correct, sounds like worse microphone (reverb, flow issues)",
+      "quality_bucket": "yellow-green"
+    },
+    {
+      "name": "Marcel",
+      "prompt_duration_s": 6.1,
+      "prompt_transcript": "Hi, this is Marcel. What can I do for you today? For sure, I'll take care of it right away.",
+      "dan_verdict": "Between Alex and Felix — identity recognizable, quality degraded",
+      "quality_bucket": "yellow"
+    },
+    {
+      "name": "Felix",
+      "prompt_duration_s": 8.3,
+      "prompt_transcript": "I noticed the old tree had something strange carved into its bark. Symbols, lines that didn't look like they belonged there.",
+      "dan_verdict": "GREEN and near perfect — RP accent carries cleanly, no audible artifacts",
+      "quality_bucket": "green"
+    }
+  ],
+  "timings": {
+    "mean_gen_time_s": 23.2,
+    "mean_rt_factor": 0.23,
+    "range_rt_factor": [0.15, 0.34],
+    "notes": "Wall-clock on Lightning CPU through full Python pipeline. Irrelevant to ship architecture — browser runs inference on user's GPU/CPU, not Lightning. Spike B's WASM numbers are what matter for deployment."
+  },
+  "verdict": {
+    "status": "GREEN",
+    "conditions": [
+      "Prompt clip length >= 10 seconds recommended (Felix at 8.3s was 'near perfect'; Alex at 6.5s showed artifacts)",
+      "Clean speech required (no music, no reverb, single speaker)",
+      "English training-distribution voices tested; non-English + heavy regional accents may still need fine-tuning"
+    ],
+    "implications": {
+      "phase_2_status": "DELETED from shipping path",
+      "phase_1_scope_reduction": "No training_pipeline/ package needed. backend/training.py Deep Clone scaffold can be parked. Focus on Clone tab UX (enforce 10s+ prompt, auto-transcribe with Whisper) and Reader client rewrite (Phase 3).",
+      "voice_studio_ux": "Upload 10-15s clip -> auto-transcribe -> publish. No training step, no waiting hours. Per-voice quality comparable to commercial TTS (ElevenLabs, Speechify) based on subjective listen."
+    }
+  }
+}

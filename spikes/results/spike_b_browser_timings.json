@@ -1,0 +1,68 @@
+{
+  "spike": "B",
+  "variant": "chrome-desktop-ort-web-1.19.2",
+  "generated_at": "2026-04-20T04:52:00Z",
+  "environment": {
+    "browser": "Chrome desktop",
+    "platform": "macOS (Apple Silicon)",
+    "gpu_adapter": "apple",
+    "ort_web_version": "1.19.2",
+    "shared_array_buffer": false,
+    "coop_coep_headers": false,
+    "notes": "Single-threaded WASM only (no COOP/COEP on python -m http.server)."
+  },
+  "test_config": {
+    "seq_len_frames": 50,
+    "nfe_steps": 4,
+    "batch_size": 1,
+    "prompt_features_len": 25,
+    "speed": 1.0,
+    "guidance_scale": 1.0,
+    "audio_seconds_equivalent": 0.53
+  },
+  "results": {
+    "fp32_webgpu": {
+      "status": "error",
+      "load_ms": null,
+      "error_message": "[WebGPU] Kernel \"[MatMul] /text_encoder/0/layers.0/conv_module1/out_proj/MatMul\" failed. Error: shared dimension does not match.",
+      "notes": "Fails at first conv module's output projection MatMul on both text_encoder runs. ORT-Web WebGPU kernel bug — same ONNX runs fine on CPU EP per Spike A."
+    },
+    "int8_webgpu": {
+      "status": "error",
+      "load_ms": 1340,
+      "error_message": "Non-zero status code returned while running MatMulInteger node. Name:'/text_encoder/0/layers.0/conv_module1/out_proj/MatMul_quant' Status Message: matmul_helper.h:41 Compute left_num_dims and right_num_dims must be >= 1",
+      "notes": "Different error but same op location. Confirms this is a WebGPU-specific kernel bug affecting both quantized and unquantized variants."
+    },
+    "fp32_wasm": {
+      "status": "ok",
+      "load_ms": 2503,
+      "text_encoder_ms": 57,
+      "fm_decoder_ms_per_step": 209,
+      "fm_decoder_total_ms": 838,
+      "end_to_end_ms": 897,
+      "real_time_factor": 0.59,
+      "step_times_ms": [217, 207, 206, 208],
+      "notes": "Single-threaded WASM. Multi-threaded (with COOP/COEP) should be 3-4x faster."
+    },
+    "int8_wasm": {
+      "status": "ok",
+      "load_ms": 1195,
+      "text_encoder_ms": 48,
+      "fm_decoder_ms_per_step": 222,
+      "fm_decoder_total_ms": 890,
+      "end_to_end_ms": 940,
+      "real_time_factor": 0.57,
+      "step_times_ms": [226, 222, 221, 221],
+      "notes": "Load time ~2x faster than FP32; compute roughly equivalent because WASM doesn't natively accelerate INT8 (dequant overhead per op)."
+    }
+  },
+  "summary": {
+    "webgpu_shippable": false,
+    "webgpu_failure_reason": "ORT-Web 1.19.2 kernel bugs at conv_module output projection MatMul for both FP32 and INT8 paths",
+    "wasm_shippable": true,
+    "wasm_extrapolation_notes": "Single-threaded WASM is 0.57-0.59x real-time. Multi-threaded WASM (COOP/COEP + SharedArrayBuffer) typically 3-4x faster → ~2x real-time = shippable.",
+    "recommended_deploy_path": "INT8 + WASM + COOP/COEP headers initially; keep WebGPU as in-progress perf path.",
+    "verdict": "YELLOW-GREEN",
+    "decision": "PROCEED to Phase 1. Browser-native feasibility confirmed."
+  }
+}

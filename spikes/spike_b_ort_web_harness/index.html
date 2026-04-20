@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Spike B — ZipVoice-Distill on ORT-Web + WebGPU</title>
+<style>
+  body {
+    font-family: -apple-system, system-ui, sans-serif;
+    max-width: 860px;
+    margin: 32px auto;
+    padding: 0 20px;
+    background: #0b0d10;
+    color: #e9ecef;
+  }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .sub { color: #8a94a0; font-size: 13px; margin-bottom: 24px; }
+  button {
+    background: #4f6df5; border: 0; color: white;
+    padding: 10px 16px; border-radius: 8px; cursor: pointer;
+    font-size: 14px; font-weight: 500;
+  }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button + button { margin-left: 8px; }
+  .row { display: flex; gap: 12px; align-items: center; margin: 14px 0; flex-wrap: wrap; }
+  label { font-size: 13px; color: #b9c1cc; }
+  input[type="text"], input[type="number"], select {
+    background: #1a1e24; border: 1px solid #2a2f38; color: #e9ecef;
+    padding: 6px 10px; border-radius: 6px; font-size: 13px;
+  }
+  input[type="text"] { width: 340px; }
+  input[type="number"] { width: 70px; }
+  #log {
+    background: #11141a; border: 1px solid #2a2f38; border-radius: 8px;
+    padding: 14px; margin-top: 18px; font-family: ui-monospace, monospace;
+    font-size: 12px; line-height: 1.5; white-space: pre-wrap;
+    max-height: 480px; overflow-y: auto;
+  }
+  .ok { color: #5fe089; }
+  .warn { color: #f5b149; }
+  .err { color: #ff5c5c; }
+  .capnote {
+    background: #1a1e24; border: 1px solid #2a2f38; border-radius: 6px;
+    padding: 10px 14px; font-size: 12px; color: #b9c1cc; margin-bottom: 14px;
+  }
+  #results {
+    margin-top: 18px;
+    display: none;
+    background: #1a1e24; border: 1px solid #2a2f38; border-radius: 8px;
+    padding: 14px;
+  }
+  #results.visible { display: block; }
+  #results h3 { margin: 0 0 10px; font-size: 14px; }
+  #results table { width: 100%; font-size: 12px; }
+  #results td { padding: 2px 8px 2px 0; }
+  #results td:first-child { color: #8a94a0; }
+  #results td:last-child { color: #5fe089; font-family: ui-monospace, monospace; }
+</style>
+</head>
+<body>
+  <h1>Spike B — ZipVoice-Distill on ORT-Web + WebGPU</h1>
+  <div class="sub">Validates that the <strong>123M-param ZipVoice-Distill flow-matching TTS</strong> loads and runs end-to-end in Chrome desktop via onnxruntime-web / WebGPU. Measures session-load + per-step timings.</div>
+
+  <div class="capnote" id="caps">Detecting WebGPU…</div>
+
+  <div class="row">
+    <label>Precision:
+      <select id="precision">
+        <option value="fp32">FP32 (472 MB total)</option>
+        <option value="int8">INT8 (124 MB total)</option>
+      </select>
+    </label>
+    <label>EP:
+      <select id="ep">
+        <option value="webgpu">WebGPU</option>
+        <option value="wasm">WASM (fallback)</option>
+      </select>
+    </label>
+    <label>NFE steps:
+      <input type="number" id="steps" value="4" min="1" max="32" />
+    </label>
+    <label>Seq length (frames):
+      <input type="number" id="seqlen" value="50" min="10" max="500" />
+    </label>
+  </div>
+
+  <div class="row">
+    <button id="loadBtn">1. Load both ONNX sessions</button>
+    <button id="runBtn" disabled>2. Run end-to-end</button>
+    <button id="clearBtn">Clear log</button>
+  </div>
+
+  <div id="log">Ready. Click "Load both ONNX sessions" to begin.</div>
+
+  <div id="results">
+    <h3>Timings summary</h3>
+    <table id="resultsTable"></table>
+  </div>
+
+  <script type="module" src="./harness.js"></script>
+</body>
+</html>
