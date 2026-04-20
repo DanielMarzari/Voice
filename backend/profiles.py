@@ -18,7 +18,7 @@ import json
 import logging
 import shutil
 import uuid
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, asdict, field, fields
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, Optional
@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 DATA_DIR = Path(__file__).parent / "data" / "profiles"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-VoiceKind = Literal["cloned", "designed"]
+VoiceKind = Literal["cloned", "designed", "uploaded"]
 
 
 @dataclass
@@ -42,6 +42,15 @@ class VoiceProfile:
     design: dict = field(default_factory=dict)
     # "Did we upload this to the server yet?" — mirrors server state.
     synced: bool = False
+    # Reference-clip transcript, produced by Whisper at clone time.
+    # Required downstream for ZipVoice zero-shot inference. Optional in
+    # the dataclass so profiles created before Phase 1 still load, but
+    # the Clone endpoint enforces presence on new `cloned` voices.
+    prompt_text: Optional[str] = None
+    # Reference-clip duration in seconds (ffprobe at clone time). The
+    # Clone endpoint enforces `duration_s >= 10.0` for new cloned voices
+    # per Spike D's finding that zero-shot quality scales with prompt length.
+    duration_s: Optional[float] = None
 
     def dir(self) -> Path:
         return DATA_DIR / self.id
@@ -78,7 +87,12 @@ def load(profile_id: str) -> Optional[VoiceProfile]:
     except json.JSONDecodeError:
         log.warning("Corrupt meta.json at %s", meta)
         return None
-    return VoiceProfile(**raw)
+    # Filter to known fields so future additions don't break loading old
+    # profiles, and old profiles don't fail on new required fields (all
+    # Phase 1 additions are Optional with defaults).
+    known = {f.name for f in fields(VoiceProfile)}
+    filtered = {k: v for k, v in raw.items() if k in known}
+    return VoiceProfile(**filtered)
 
 
 def list_all() -> list[VoiceProfile]:

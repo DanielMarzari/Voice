@@ -170,13 +170,24 @@ def upload_profile(
     if not sample_path.exists():
         raise FileNotFoundError(f"sample.mp3 missing for profile {profile.id}")
 
+    # Reader stores `design` as a JSON blob (voice_profiles.meta_json),
+    # so packing prompt_text + duration_s in there avoids a Reader-side
+    # schema migration. Reader's ZipVoice inference path will read them
+    # back out of design when synthesizing. Keep top-level design fields
+    # untouched for back-compat with existing designed voices.
+    design_payload = dict(profile.design)
+    if profile.prompt_text is not None:
+        design_payload["prompt_text"] = profile.prompt_text
+    if profile.duration_s is not None:
+        design_payload["prompt_duration_s"] = profile.duration_s
+
     payload = {
         "id": profile.id,
         "name": profile.name,
         "kind": profile.kind,
         "engine": profile.engine,
         "createdAt": profile.created_at,
-        "design": profile.design,
+        "design": design_payload,
     }
 
     headers = {"Authorization": f"Bearer {token}"}

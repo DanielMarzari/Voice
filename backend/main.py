@@ -54,7 +54,14 @@ import profiles
 import reader_client
 import render_worker
 import training
+import transcribe
 import tts
+
+# Zero-shot voice cloning (ZipVoice-Distill) needs a reference-clip
+# transcript + sufficient prompt duration to carry voice identity.
+# Spike D (see spikes/spike_d_zero_shot/) established that prompts < ~8s
+# degrade noticeably. We enforce 10s as a safe minimum.
+MIN_PROMPT_DURATION_S = 10.0
 
 # Load .env.local from the repo root (one level up from backend/).
 ROOT = Path(__file__).parent.parent
@@ -160,12 +167,18 @@ class ProfileResponse(BaseModel):
     created_at: str
     design: dict
     synced: bool
+    # Optional because profiles created before Phase 1's Clone gate
+    # (or "designed" voices which don't have a reference clip at all)
+    # won't have these populated.
+    prompt_text: Optional[str] = None
+    duration_s: Optional[float] = None
 
 
 def _to_response(p: profiles.VoiceProfile) -> ProfileResponse:
     return ProfileResponse(
         id=p.id, name=p.name, kind=p.kind, engine=p.engine,
         created_at=p.created_at, design=p.design, synced=p.synced,
+        prompt_text=p.prompt_text, duration_s=p.duration_s,
     )
 
 
@@ -431,11 +444,52 @@ async def clone_voice(
     src_path = profile.dir() / f"source{src_ext}"
     src_path.write_bytes(raw)
 
+    # Gate 1: duration. Per Spike D, zero-shot voice identity transfer
+    # needs >= 10 s of clean speech. We check after writing to disk so
+    # ffprobe sees the real file (not the in-memory bytes).
+    try:
+        duration_s = transcribe.probe_duration(src_path)
+    except Exception as e:
+        shutil.rmtree(profile.dir(), ignore_errors=True)
+        raise HTTPException(400, f"Could not read audio file: {e}")
+    if duration_s < MIN_PROMPT_DURATION_S:
+        shutil.rmtree(profile.dir(), ignore_errors=True)
+        raise HTTPException(
+            400,
+            f"Reference clip is {duration_s:.1f}s — need at least "
+            f"{MIN_PROMPT_DURATION_S:.0f}s for good zero-shot quality. "
+            f"Record a longer clip (10–20 s of clean speech works best).",
+        )
+    profile.duration_s = round(duration_s, 2)
+
+    # Gate 2: transcript. The user can supply one via ref_text; otherwise
+    # we auto-transcribe with Whisper. Either way, the final transcript
+    # lives on the profile for Reader to hand to ZipVoice at inference time.
+    if ref_text and ref_text.strip():
+        profile.prompt_text = ref_text.strip()
+    else:
+        log.info("Clone %s: auto-transcribing %.1fs reference…", profile.id, duration_s)
+        try:
+            auto = transcribe.transcribe_file(src_path, language=language)
+        except transcribe.TranscribeError as e:
+            log.warning("Auto-transcribe failed: %s", e)
+            auto = None
+        if auto is None:
+            shutil.rmtree(profile.dir(), ignore_errors=True)
+            raise HTTPException(
+                400,
+                "Auto-transcribe unavailable. Either install faster-whisper "
+                "(`pip install -r backend/requirements.txt` in the backend venv) "
+                "or paste what's being said in the Advanced → transcript box and retry.",
+            )
+        profile.prompt_text = auto
+        log.info("Clone %s: transcript: %s", profile.id, auto[:100])
+
     try:
         result = engine.synthesize(
             text=preview_text,
             ref_audio_path=str(src_path),
-            ref_text=ref_text,
+            ref_text=profile.prompt_text,
             speed=1.0,
             language=language,
         )

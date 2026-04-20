@@ -19,11 +19,44 @@ type Props = {
   onCreated: (p: Profile) => void;
 };
 
+/** Min reference-clip duration in seconds. Per Spike D (April 2026),
+ *  zero-shot voice identity transfer degrades noticeably on prompts
+ *  shorter than this. The backend re-validates so this is advisory UX. */
+const MIN_DURATION_S = 10;
+
+/** Probe an audio file's duration client-side via a hidden <audio>
+ *  element. Avoids reading the whole file into memory — <audio>
+ *  streams it and fires `durationchange`. Returns NaN if the browser
+ *  can't decode the container (very rare for wav/mp3). */
+function probeDurationFromFile(file: File): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const el = document.createElement("audio");
+    el.preload = "metadata";
+    el.src = url;
+    const cleanup = () => {
+      URL.revokeObjectURL(url);
+      el.remove();
+    };
+    el.addEventListener("loadedmetadata", () => {
+      const d = el.duration;
+      cleanup();
+      resolve(Number.isFinite(d) ? d : NaN);
+    });
+    el.addEventListener("error", () => {
+      cleanup();
+      reject(new Error("Could not decode audio"));
+    });
+  });
+}
+
 export function CloneTab({ onCreated }: Props) {
   const [name, setName] = useState("");
   const [previewText, setPreviewText] = useState(DEFAULT_PREVIEW_TEXT);
   const [refText, setRefText] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [fileDuration, setFileDuration] = useState<number | null>(null);
+  const [fileDurationError, setFileDurationError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState<"preview" | "save" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -33,6 +66,37 @@ export function CloneTab({ onCreated }: Props) {
   const [sessionItems, setSessionItems] = useState<SessionItem[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const durationOk = fileDuration != null && fileDuration >= MIN_DURATION_S;
+  const durationTooShort = fileDuration != null && fileDuration < MIN_DURATION_S;
+
+  // When a new file is dropped, probe its duration client-side so we
+  // can gate Save without a round-trip. The backend re-validates.
+  useEffect(() => {
+    if (!file) {
+      setFileDuration(null);
+      setFileDurationError(null);
+      return;
+    }
+    let cancelled = false;
+    setFileDuration(null);
+    setFileDurationError(null);
+    probeDurationFromFile(file)
+      .then((d) => {
+        if (cancelled) return;
+        if (Number.isNaN(d)) {
+          setFileDurationError("Could not read audio length");
+        } else {
+          setFileDuration(d);
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) setFileDurationError((e as Error).message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [file]);
 
   // Clean up all blob URLs when the tab unmounts. previewUrl aliases one
   // of the session items during its lifetime, so revoking the list here
@@ -168,7 +232,7 @@ export function CloneTab({ onCreated }: Props) {
           <label className="block text-sm font-medium mb-1.5">
             Reference audio
             <span className="ml-2 text-xs text-[color:var(--muted)] font-normal">
-              10–20s of clean speech works best
+              ≥{MIN_DURATION_S}s of clean speech (10–20s is ideal)
             </span>
           </label>
           <div
@@ -181,7 +245,7 @@ export function CloneTab({ onCreated }: Props) {
             onClick={() => inputRef.current?.click()}
             className={`card flex flex-col items-center justify-center text-center cursor-pointer transition-colors ${
               dragging ? "border-[color:var(--accent)]" : ""
-            }`}
+            } ${durationTooShort ? "border-red-500/60" : ""}`}
             style={{ minHeight: 160 }}
           >
             <input
@@ -195,15 +259,37 @@ export function CloneTab({ onCreated }: Props) {
               <>
                 <div className="text-base font-medium">{file.name}</div>
                 <div className="text-xs text-[color:var(--muted)] mt-1">
-                  {(file.size / 1024).toFixed(0)} KB · click to replace
+                  {(file.size / 1024).toFixed(0)} KB
+                  {fileDuration != null && (
+                    <>
+                      {" · "}
+                      <span className={durationOk ? "text-[color:var(--foreground)]" : "text-red-400"}>
+                        {fileDuration.toFixed(1)}s
+                      </span>
+                    </>
+                  )}
+                  {" · click to replace"}
                 </div>
+                {durationTooShort && (
+                  <div className="text-xs text-red-400 mt-2 max-w-sm">
+                    ⚠ Too short for good zero-shot quality. Voices cloned from
+                    clips under {MIN_DURATION_S}s sound muffled / off-mic.
+                    Record or pick a longer clip.
+                  </div>
+                )}
+                {fileDurationError && (
+                  <div className="text-xs text-red-400 mt-2">
+                    Could not read audio length — upload may still work if the
+                    backend can decode it.
+                  </div>
+                )}
               </>
             ) : (
               <>
                 <div className="text-4xl mb-2 opacity-60">⇡</div>
                 <div className="text-sm font-medium">Drop a WAV or MP3, or click to browse</div>
                 <div className="text-xs text-[color:var(--muted)] mt-1">
-                  Will be resampled to 24 kHz mono
+                  Min {MIN_DURATION_S}s · resampled to 24 kHz mono
                 </div>
               </>
             )}
@@ -217,13 +303,15 @@ export function CloneTab({ onCreated }: Props) {
           <div className="space-y-3 pt-3">
             <div>
               <label className="block text-xs font-medium mb-1 text-[color:var(--muted)]">
-                What&apos;s being said in the reference clip? (optional — speeds up
-                cloning and improves prosody)
+                What&apos;s being said in the reference clip?{" "}
+                <span className="text-[color:var(--muted)]">
+                  (leave blank — Whisper auto-transcribes on save)
+                </span>
               </label>
               <textarea
                 className="input"
                 rows={2}
-                placeholder="Leave blank to auto-transcribe…"
+                placeholder="Leave blank to auto-transcribe on save…"
                 value={refText}
                 onChange={(e) => setRefText(e.target.value)}
               />
@@ -254,7 +342,12 @@ export function CloneTab({ onCreated }: Props) {
           <button
             className="btn btn-primary"
             onClick={onSave}
-            disabled={!!busy || !file || !name.trim()}
+            disabled={!!busy || !file || !name.trim() || durationTooShort}
+            title={
+              durationTooShort
+                ? `Reference clip must be at least ${MIN_DURATION_S}s`
+                : undefined
+            }
           >
             {busy === "save" ? "Saving…" : "Save voice"}
           </button>
@@ -277,7 +370,10 @@ export function CloneTab({ onCreated }: Props) {
             <div className="text-center">
               <div className="font-medium">{result.name}</div>
               <div className="text-xs text-[color:var(--muted)] mt-0.5">
-                Cloned · {result.synced ? "synced to Reader" : "local only"}
+                Cloned
+                {result.duration_s != null && ` · ${result.duration_s.toFixed(1)}s prompt`}
+                {" · "}
+                {result.synced ? "synced to Reader" : "local only"}
               </div>
             </div>
             <audio
@@ -288,6 +384,16 @@ export function CloneTab({ onCreated }: Props) {
               onEnded={() => setAudioPlaying(false)}
               src={sampleUrl(result.id)}
             />
+            {result.prompt_text && (
+              <details className="text-xs text-[color:var(--muted)]">
+                <summary className="cursor-pointer hover:text-[color:var(--foreground)]">
+                  Auto-transcribed prompt
+                </summary>
+                <div className="mt-2 p-2 rounded bg-[color:var(--surface-2)] text-[color:var(--foreground)] leading-relaxed">
+                  &ldquo;{result.prompt_text}&rdquo;
+                </div>
+              </details>
+            )}
           </div>
         ) : previewUrl ? (
           <audio

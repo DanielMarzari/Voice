@@ -1,0 +1,39 @@
+{
+  "generated_at": "2026-04-20T22:14:10Z",
+  "source": {
+    "hf_repo": "wetdog/vocos-mel-24khz-onnx",
+    "hf_file": "mel_spec_24khz.onnx",
+    "hf_url": "https://huggingface.co/wetdog/vocos-mel-24khz-onnx/resolve/main/mel_spec_24khz.onnx",
+    "note": "Upstream ONNX from wetdog. iSTFT runs outside ONNX (no ONNX operator exists for istft). Phase 3 ports the iSTFT step to JS."
+  },
+  "istft_config": {
+    "n_fft": 1024,
+    "hop_length": 256,
+    "win_length": 1024,
+    "window": "hann",
+    "sampling_rate": 24000,
+    "n_mels": 100
+  },
+  "io": {
+    "input": "mels: float32 [batch, 100, n_frames]",
+    "outputs": {
+      "mag": "float32 [batch, 513, n_frames]  (magnitude)",
+      "x": "float32 [batch, 513, n_frames]    (cos(phase))",
+      "y": "float32 [batch, 513, n_frames]    (sin(phase))"
+    },
+    "note": "To get audio: spec = (mag*x) + 1j*(mag*y); wav = iSTFT(spec, n_fft=1024, hop=256, window='hann')"
+  },
+  "fp32": {
+    "path": "backend/data/models/vocos.onnx",
+    "size_mb": 51.6,
+    "sha256": "a84c58728a769e8a98eeca75bb89102987db0028e5e3d44b45af2ae3ef0104e2",
+    "parity_max_rms": 0.0,
+    "parity_mean_rms": 0.0
+  },
+  "fp16": {
+    "path": "backend/data/models/vocos_fp16.onnx",
+    "size_mb": 25.9,
+    "sha256": "0d03bb5c133540b424b5c400a65b9fd25465c79b964836bbce4f52ae355b1990",
+    "parity_max_rms": 6.5e-05
+  }
+}

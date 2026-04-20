@@ -36,8 +36,15 @@ export type Profile = {
     pitch?: number;
     speed?: number;
     temperature?: number;
+    [k: string]: unknown;
   };
   synced: boolean;
+  /** Reference-clip transcript (Whisper-generated at clone time, or user-
+   *  supplied). Required for zero-shot inference in Reader. */
+  prompt_text?: string | null;
+  /** Reference-clip duration in seconds. The Clone tab enforces >= 10 s
+   *  client-side; the backend re-validates. */
+  duration_s?: number | null;
 };
 
 export type Preset = {
