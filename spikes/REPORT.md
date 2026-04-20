@@ -8,18 +8,23 @@
 | Spike | Status | Headline number | Go/No-go |
 |-------|--------|-----------------|----------|
 | A — ZipVoice-Distill ONNX on CPU | ✅ done | 124 MB INT8 / 472 MB FP32 total; 1.7× real-time on CPU | **GREEN** |
-| B — ORT-Web load + run | ⬜ not started | — | — |
+| B — ORT-Web in Chrome | ✅ done | WASM: 0.57–0.59× RT single-threaded; WebGPU: bug-blocked | **YELLOW→GREEN** |
 | C — Vocos → ONNX | ⏸ deferred | ZipVoice embeds its own vocoder; Vocos may not be needed | — |
 | D — Fine-tune timing on T4 | ⬜ not started | — | — |
 | E — Distillation starter survey | ✅ done | ZipVoice-Distill obsoletes custom distillation | **GREEN** |
 
-**Overall recommendation (preliminary, after Spikes A + E):** 🟢 **Strong
-proceed to Phase 1.** The architectural risks Phase 0 was designed to
-surface have mostly resolved in the happy direction: k2-fsa has shipped
-what we were going to build, the ONNX loads cleanly on CPU, download
-budgets are better than planned (124 MB INT8 / 472 MB FP32), and Phase 2
-distillation scope collapses to zero. Remaining risk is Spike B
-(WebGPU in-browser) and Spike D (per-voice fine-tune timing on T4).
+**Overall recommendation (after Spikes A + B + E):** 🟢 **Strong
+proceed to Phase 1.** Three of four high-risk spikes now closed with
+concrete numbers: k2-fsa pre-exported our base model so distillation
+is unnecessary (E), the ONNX loads and runs cleanly on CPU (A), and
+the same ONNX runs end-to-end in Chrome within a second on single-
+threaded WASM (B). Phase 1's training infrastructure is unblocked.
+Remaining open risk is Spike D (per-voice fine-tune timing on T4);
+Spike C (Vocos) is deferred as likely unnecessary.
+
+Deployment shape (from B's numbers): ship **INT8 + WASM + COOP/COEP**
+initially (~2× real-time), keep WebGPU as an in-progress perf path
+for the ORT-Web team to fix upstream.
 
 ---
 
@@ -91,23 +96,77 @@ scope reduction the spikes have produced.
 
 ## Spike B — ORT-Web + WebGPU feasibility
 
-**Goal:** load Spike A's ONNX in Chrome via `onnxruntime-web` WebGPU EP, run
-1 sentence of inference end-to-end (F5 + Vocos from Spike C) in < 60 s.
+**Goal (revised after Spike E + A):** load k2-fsa's pre-exported
+ZipVoice-Distill ONNX (text_encoder + fm_decoder) in Chrome desktop
+via `onnxruntime-web`, run end-to-end inference (4-NFE flow sampling)
+with dummy tokens, and measure load + per-step timings.
 
-**Environment:** _(browser + version, GPU, OS)_
+**Environment:** Chrome desktop on MacBook (Apple Silicon GPU via
+WebGPU adapter), ORT-Web 1.19.2 from CDN, local `python3 -m http.server`
+(single-threaded WASM — no COOP/COEP headers in this spike).
+**Harness:** `spikes/spike_b_ort_web_harness/` (`index.html` + `harness.js`)
 
-### Results
-- Model load time: __ s
-- First inference wall-clock: __ s
-- Sentence length tested: __ tokens
-- Console errors / warnings: _(paste or "none")_
-- WASM fallback also tested? ⬜ yes / ⬜ no — time: __ s
-- Peak GPU memory observed (DevTools → Performance → Memory): __ MB
+### Results matrix
+
+Tested all 4 combinations of precision × execution provider. Sequence
+length 50 frames, 4 NFE steps, batch=1.
+
+| Precision | EP | Status | Load time | End-to-end |
+|-----------|----|----|-----------|------------|
+| FP32 | WebGPU | ❌ | 472 MB load ok | crashes at `conv_module1/out_proj/MatMul` — _"shared dimension does not match"_ |
+| INT8 | WebGPU | ❌ | 124 MB load ok | crashes at `conv_module1/out_proj/MatMul_quant` — _"left_num_dims and right_num_dims must be >= 1"_ |
+| FP32 | WASM | ✅ | 2503 ms | **897 ms** (text 57 + fm 209 ms × 4) → 0.59× real-time |
+| INT8 | WASM | ✅ | 1195 ms | **940 ms** (text 48 + fm 222 ms × 4) → 0.57× real-time |
+
+WebGPU hits onnxruntime-web kernel bugs at the same graph location for
+both precisions — the first conv module's output projection MatMul in
+ZipVoice's Zipformer stack. These are ORT-Web implementation issues
+(the same ONNX runs fine on ORT CPU in Spike A); not our bug.
+
+WASM runs **end-to-end successfully** on both FP32 and INT8 at roughly
+equivalent compute (INT8's advantage is eaten by WASM's dequant-per-op
+overhead since WASM doesn't natively accelerate INT8). INT8 wins on
+load time (~2× faster) and download size (4× smaller) — the right
+choice for deployment.
+
+### What this proves
+
+- ✅ ORT-Web **loads and executes** ZipVoice-Distill end-to-end in Chrome
+- ✅ The full 4-NFE flow-matching loop completes in **under 1 second**
+  on the pessimistic single-threaded WASM backend
+- ✅ ONNX files (downloaded from HF or our own copies) work identically
+- 🟡 WebGPU EP has op-coverage bugs for ZipVoice; WASM is the shippable
+  path until ORT-Web's WebGPU kernels catch up
+
+### Extrapolated production numbers
+
+- **Multi-threaded WASM** (COOP/COEP headers → `SharedArrayBuffer`):
+  typical 3–4× speedup over single-threaded. Extrapolates to ~225–300 ms
+  per sentence → **~2× real-time**. This is shippable today.
+- **WebGPU once fixed** (either ORT-Web 1.20+, a workaround in our
+  export, or a switch to an alternative web runtime): typically 5–10×
+  over WASM for matmul-heavy models → ~50–100 ms per sentence. That's
+  what gets us to "instant" for first-sentence playback.
 
 ### Notes
-_(shader compile issues, missing ops, anything weird)_
+
+- COOP/COEP headers were NOT set in this spike — Python's `http.server`
+  doesn't set them by default. Multi-threaded WASM numbers will land
+  higher when Phase 3's Reader dev server adds those headers.
+- ORT-Web 1.19.2 was pinned deliberately to match Spike A's server-side
+  version. Worth re-running Spike B on 1.20+ when we pick up Phase 3 —
+  the WebGPU MatMul kernel may already be fixed upstream.
+- No console warnings about unsupported ops during model loading —
+  failures are at runtime in the specific WebGPU kernel implementation.
 
 ### Go/No-go
+
+**🟡 YELLOW→GREEN — PROCEED.** Browser-native ZipVoice-Distill
+inference is demonstrably feasible in Chrome desktop via ORT-Web.
+WebGPU is the long-term perf path but WASM-multi-threaded is viable
+for initial ship. Phase 3's critical path adds COOP/COEP headers
+to Reader's Next.js config (one-line fix) and measures multi-threaded
+WASM; WebGPU fix is a parallel workstream that doesn't block shipping.
 
 ---
 
