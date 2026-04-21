@@ -51,6 +51,13 @@ class VoiceProfile:
     # Clone endpoint enforces `duration_s >= 10.0` for new cloned voices
     # per Spike D's finding that zero-shot quality scales with prompt length.
     duration_s: Optional[float] = None
+    # Number of mel frames in the prompt spectrogram (set by
+    # mel_features.compute_prompt_mel() at clone time). Reader's
+    # browser inference reads the full file at /api/voices/<id>/prompt-mel
+    # but we keep the frame count on the profile for a quick
+    # "does this voice have a prompt_mel yet" check without the
+    # Reader-side round-trip.
+    prompt_mel_frames: Optional[int] = None
 
     def dir(self) -> Path:
         return DATA_DIR / self.id
@@ -63,6 +70,12 @@ class VoiceProfile:
 
     def source_path(self) -> Path:
         return self.dir() / "source.wav"
+
+    def prompt_mel_path(self) -> Path:
+        return self.dir() / "prompt_mel.f32"
+
+    def prompt_mel_meta_path(self) -> Path:
+        return self.dir() / "prompt_mel_meta.json"
 
 
 def _now() -> str:

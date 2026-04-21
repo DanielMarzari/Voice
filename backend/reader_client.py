@@ -180,6 +180,8 @@ def upload_profile(
         design_payload["prompt_text"] = profile.prompt_text
     if profile.duration_s is not None:
         design_payload["prompt_duration_s"] = profile.duration_s
+    if profile.prompt_mel_frames is not None:
+        design_payload["prompt_mel_frames"] = profile.prompt_mel_frames
 
     payload = {
         "id": profile.id,
@@ -194,6 +196,19 @@ def upload_profile(
 
     sample_f = sample_path.open("rb")
     cover_f = cover_path.open("rb") if cover_path and cover_path.exists() else None
+    # Ship the prompt_mel Float32 blob + its metadata JSON as two
+    # additional multipart fields. Reader saves them alongside sample.mp3
+    # in the voice's storage dir and exposes them via
+    # /api/voices/<id>/prompt-mel{,-meta}, which the browser client
+    # fetches to feed fm_decoder's `speech_condition`.
+    prompt_mel_path = profile.prompt_mel_path()
+    prompt_mel_meta_path = profile.prompt_mel_meta_path()
+    prompt_mel_f = (
+        prompt_mel_path.open("rb") if prompt_mel_path.exists() else None
+    )
+    prompt_mel_meta_f = (
+        prompt_mel_meta_path.open("rb") if prompt_mel_meta_path.exists() else None
+    )
     try:
         files = [
             ("metadata", (None, json.dumps(payload), "application/json")),
@@ -209,6 +224,20 @@ def upload_profile(
                 ".gif": "image/gif",
             }.get(cover_path.suffix.lower(), "application/octet-stream")
             files.append(("cover", (f"cover{cover_path.suffix.lower()}", cover_f, ctype)))
+        if prompt_mel_f is not None:
+            files.append(
+                (
+                    "prompt_mel",
+                    ("prompt_mel.f32", prompt_mel_f, "application/octet-stream"),
+                )
+            )
+        if prompt_mel_meta_f is not None:
+            files.append(
+                (
+                    "prompt_mel_meta",
+                    ("prompt_mel_meta.json", prompt_mel_meta_f, "application/json"),
+                )
+            )
 
         try:
             r = httpx.post(
@@ -223,6 +252,10 @@ def upload_profile(
         sample_f.close()
         if cover_f is not None:
             cover_f.close()
+        if prompt_mel_f is not None:
+            prompt_mel_f.close()
+        if prompt_mel_meta_f is not None:
+            prompt_mel_meta_f.close()
 
     if r.status_code // 100 != 2:
         raise ReaderUploadError(

@@ -50,6 +50,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
+import mel_features
 import profiles
 import reader_client
 import render_worker
@@ -172,6 +173,7 @@ class ProfileResponse(BaseModel):
     # won't have these populated.
     prompt_text: Optional[str] = None
     duration_s: Optional[float] = None
+    prompt_mel_frames: Optional[int] = None
 
 
 def _to_response(p: profiles.VoiceProfile) -> ProfileResponse:
@@ -179,6 +181,7 @@ def _to_response(p: profiles.VoiceProfile) -> ProfileResponse:
         id=p.id, name=p.name, kind=p.kind, engine=p.engine,
         created_at=p.created_at, design=p.design, synced=p.synced,
         prompt_text=p.prompt_text, duration_s=p.duration_s,
+        prompt_mel_frames=p.prompt_mel_frames,
     )
 
 
@@ -499,6 +502,28 @@ async def clone_voice(
         log.exception("Clone synthesis failed")
         shutil.rmtree(profile.dir(), ignore_errors=True)
         raise HTTPException(500, f"Synthesis failed: {e}")
+
+    # Gate 3: prompt_mel. Reader's browser inference needs the reference
+    # clip's log-mel spectrogram as `speech_condition` — without it the
+    # flow-matching model has no voice identity to clone from and emits
+    # noise. Compute matches ZipVoice's VocosFbank exactly via
+    # mel_features.compute_prompt_mel (same helper the one-off CLI uses).
+    try:
+        mel_result = mel_features.compute_prompt_mel(
+            src_path, out_dir=profile.dir()
+        )
+        profile.prompt_mel_frames = mel_result.num_frames
+        log.info(
+            "Clone %s: prompt_mel %d frames (%.1f KB)",
+            profile.id, mel_result.num_frames, mel_result.byte_size / 1024,
+        )
+    except Exception as e:
+        log.warning("prompt_mel computation failed: %s", e)
+        # Don't abort the whole clone — the voice still works for
+        # Voice Studio's own preview synthesis (which uses F5/XTTS, not
+        # ZipVoice). Reader's browser inference won't be able to use
+        # this voice until prompt_mel is recomputed, but that's
+        # recoverable via scripts/compute_prompt_mel.py.
 
     profiles.save(profile)
 

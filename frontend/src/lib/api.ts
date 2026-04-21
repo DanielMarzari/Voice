@@ -45,6 +45,11 @@ export type Profile = {
   /** Reference-clip duration in seconds. The Clone tab enforces >= 10 s
    *  client-side; the backend re-validates. */
   duration_s?: number | null;
+  /** Number of mel frames in the prompt spectrogram (prompt_mel.f32 on
+   *  disk; ~num_frames = duration_s × 24000 / 256). Set by the clone
+   *  endpoint via mel_features.compute_prompt_mel. Presence on a synced
+   *  profile means Reader's browser-inference path can use this voice. */
+  prompt_mel_frames?: number | null;
 };
 
 export type Preset = {
