@@ -34,7 +34,14 @@ export function ImportTab({ onCreated }: Props) {
 
   const [visual, setVisual] = useState<VisualMode>("sphere");
   const [moodId, setMoodId] = useState<string>(MOODS[0].id);
-  const [paletteSeed, setPaletteSeed] = useState<number>(() => Math.random());
+  // Seed starts at 0 (SSR-safe) and randomizes post-mount — a `Math.random()`
+  // initializer here would diverge between server and client renders and
+  // trigger React's hydration warning on VoiceSphere's colors prop. Same
+  // pattern as CloneTab / DesignTab.
+  const [paletteSeed, setPaletteSeed] = useState<number>(0);
+  useEffect(() => {
+    setPaletteSeed(Math.random());
+  }, []);
   const [cover, setCover] = useState<File | null>(null);
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
 

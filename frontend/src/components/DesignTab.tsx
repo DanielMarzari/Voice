@@ -52,8 +52,16 @@ export function DesignTab({ onCreated }: Props) {
 
   // Color mood: dropdown of curated palettes + a seed we bump on
   // "Regenerate" to randomize within the chosen mood.
+  //
+  // Seed starts at 0 (SSR-safe) and randomizes post-mount — a
+  // `Math.random()` initializer would diverge between server and client
+  // renders and trigger React's hydration warning on VoiceSphere's
+  // colors prop. Same pattern as CloneTab / ImportTab.
   const [moodId, setMoodId] = useState<string>(MOODS[0].id);
-  const [paletteSeed, setPaletteSeed] = useState<number>(() => Math.random());
+  const [paletteSeed, setPaletteSeed] = useState<number>(0);
+  useEffect(() => {
+    setPaletteSeed(Math.random());
+  }, []);
 
   // In-memory list of previews generated during this tab session. Lets the
   // user A/B between unsaved generations without re-synthesizing. Cleared

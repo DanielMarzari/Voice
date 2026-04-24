@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   cloneVoice,
   DEFAULT_PREVIEW_TEXT,
@@ -12,8 +12,10 @@ import {
 } from "@/lib/api";
 import { EnginePicker, useEngineChoice } from "@/components/EnginePicker";
 import { GenerationProgress } from "@/components/GenerationProgress";
+import { MoodPicker } from "@/components/MoodPicker";
 import { SessionHistory, type SessionItem } from "@/components/SessionHistory";
 import { VoiceSphere } from "@/components/VoiceSphere";
+import { MOODS, moodPalette } from "@/lib/moodPalettes";
 
 type Props = {
   onCreated: (p: Profile) => void;
@@ -21,8 +23,10 @@ type Props = {
 
 /** Min reference-clip duration in seconds. Per Spike D (April 2026),
  *  zero-shot voice identity transfer degrades noticeably on prompts
- *  shorter than this. The backend re-validates so this is advisory UX. */
-const MIN_DURATION_S = 10;
+ *  shorter than ~8 s, but the flow still produces usable output down
+ *  to 5 s. We enforce 5 s as the floor so short test clips aren't
+ *  rejected; the backend (MIN_PROMPT_DURATION_S) re-validates. */
+const MIN_DURATION_S = 5;
 
 /** Probe an audio file's duration client-side via a hidden <audio>
  *  element. Avoids reading the whole file into memory — <audio>
@@ -66,6 +70,26 @@ export function CloneTab({ onCreated }: Props) {
   const [sessionItems, setSessionItems] = useState<SessionItem[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Sphere colour mood — same palette system as the Import + Design tabs.
+  // Persisted into profile.design.colors on Save so Reader's voice picker
+  // reproduces the exact mood the user chose here.
+  //
+  // NOTE on the seed: we can't seed with `Math.random()` in useState because
+  // Clone is the default tab and gets SSR'd; a random initializer produces
+  // different values on server vs client and blows up hydration with a
+  // "server rendered HTML didn't match the client" warning on <VoiceSphere>'s
+  // colors prop. Seed with 0 (deterministic, SSR-safe) and randomize in a
+  // post-mount effect so the user still gets a fresh palette per visit.
+  const [moodId, setMoodId] = useState<string>(MOODS[0].id);
+  const [paletteSeed, setPaletteSeed] = useState<number>(0);
+  useEffect(() => {
+    setPaletteSeed(Math.random());
+  }, []);
+  const livePalette = useMemo(
+    () => moodPalette(moodId, paletteSeed),
+    [moodId, paletteSeed]
+  );
 
   const durationOk = fileDuration != null && fileDuration >= MIN_DURATION_S;
   const durationTooShort = fileDuration != null && fileDuration < MIN_DURATION_S;
@@ -193,6 +217,7 @@ export function CloneTab({ onCreated }: Props) {
         language,
         previewText: previewText.trim() || undefined,
         refText: refText.trim() || undefined,
+        colors: livePalette as unknown as string[],
       });
       setResult(p);
       onCreated(p);
@@ -201,7 +226,7 @@ export function CloneTab({ onCreated }: Props) {
     } finally {
       setBusy(null);
     }
-  }, [file, name, engine, language, previewText, refText, busy, onCreated]);
+  }, [file, name, engine, language, previewText, refText, busy, onCreated, livePalette]);
 
   return (
     <div className="grid md:grid-cols-[1fr_320px] gap-8 items-start">
@@ -232,7 +257,7 @@ export function CloneTab({ onCreated }: Props) {
           <label className="block text-sm font-medium mb-1.5">
             Reference audio
             <span className="ml-2 text-xs text-[color:var(--muted)] font-normal">
-              ≥{MIN_DURATION_S}s of clean speech (10–20s is ideal)
+              ≥{MIN_DURATION_S}s of clean speech (10–20s is ideal, 5s works for testing)
             </span>
           </label>
           <div
@@ -364,7 +389,26 @@ export function CloneTab({ onCreated }: Props) {
           speaking={audioPlaying}
           ready={(!!previewUrl || !!result) && !audioPlaying}
           withPlayIcon={false}
+          colors={livePalette}
         />
+        {/* Once saved, the server-side palette is the source of truth and
+            changing the mood here would just be decorative — hide the
+            picker in that state. Before save, it drives both the live
+            sphere colour and the `colors` payload sent to /api/clone. */}
+        {!result && (
+          <div className="mt-5 w-full max-w-[260px]">
+            <MoodPicker
+              moodId={moodId}
+              onMoodChange={(id) => {
+                setMoodId(id);
+                setPaletteSeed(Math.random());
+              }}
+              onRegenerate={() => setPaletteSeed(Math.random())}
+              palette={livePalette}
+              compact
+            />
+          </div>
+        )}
         {result ? (
           <div className="mt-5 w-full space-y-3">
             <div className="text-center">

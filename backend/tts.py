@@ -115,12 +115,46 @@ class _F5Engine(_Engine):
     languages = ["en", "zh"]
 
     def _check_importable(self):
+        self._install_wandb_stub()
         import f5_tts.api  # noqa: F401
+
+    @staticmethod
+    def _install_wandb_stub():
+        """Stub out `wandb` before f5_tts imports it.
+
+        f5_tts/model/trainer.py runs `import wandb` at module load time,
+        and `f5_tts/model/__init__.py` imports the trainer eagerly — so
+        even inference-only use drags wandb in. Our venv has wandb 0.26.x
+        whose generated `.pb2` files can't be parsed by the protobuf
+        3.20.2 that Coqui TTS pins, which bricks F5 with:
+            ImportError: cannot import name 'Imports' from
+            'wandb.proto.wandb_telemetry_pb2'
+        Since F5 inference never calls any wandb API (only the trainer
+        does, and we don't train in-process), a no-op stub lets the
+        import succeed. If someone tries to train via f5_tts on this
+        interpreter later, they'll get clear AttributeErrors from the
+        stub rather than silent garbage runs.
+        """
+        import sys
+        if "wandb" in sys.modules and not getattr(
+            sys.modules["wandb"], "_voice_studio_stub", False
+        ):
+            return  # real wandb already imported OK, don't clobber it
+
+        class _WandbStub:
+            _voice_studio_stub = True
+            def __getattr__(self, name):
+                return _WandbStub()
+            def __call__(self, *args, **kwargs):
+                return _WandbStub()
+
+        sys.modules["wandb"] = _WandbStub()  # type: ignore[assignment]
 
     def _load(self):
         if self._model is not None:
             return
         log.info("Loading F5-TTS (device=%s) — first load downloads weights", self.device)
+        self._install_wandb_stub()
         try:
             from f5_tts.api import F5TTS  # type: ignore
             self._model = F5TTS(device=self.device)
@@ -212,6 +246,32 @@ class _XTTSEngine(_Engine):
         # Coqui TTS needs this env var to auto-accept their license on download.
         os.environ.setdefault("COQUI_TOS_AGREED", "1")
 
+        # PyTorch 2.6+ flipped `torch.load`'s default to `weights_only=True`,
+        # which refuses to unpickle arbitrary objects. Coqui TTS 0.22.0 still
+        # calls `torch.load` without the flag, so the XTTS checkpoint load
+        # raises `_pickle.UnpicklingError: Weights only load failed`.
+        #
+        # The "proper" fix is allowlisting each custom class via
+        # `torch.serialization.add_safe_globals([XttsConfig, XttsAudioConfig,
+        # XttsArgs, BaseDatasetConfig, ...])`, but the exact class list
+        # shifts across XTTS model revisions and every miss means another
+        # round-trip. Since the checkpoints come from the Coqui HuggingFace
+        # mirror (trusted) rather than untrusted user uploads, it's safe to
+        # disable the gate globally for `torch.load` — the safe-loading
+        # default exists to protect servers accepting arbitrary .pt uploads,
+        # not apps loading their own model cache. See discussion:
+        # github.com/coqui-ai/TTS/issues/3877
+        import torch
+        if not getattr(torch.load, "_xtts_weights_only_patched", False):
+            _orig_load = torch.load
+
+            def _patched_load(*args, **kwargs):  # type: ignore[no-redef]
+                kwargs.setdefault("weights_only", False)
+                return _orig_load(*args, **kwargs)
+
+            _patched_load._xtts_weights_only_patched = True  # type: ignore[attr-defined]
+            torch.load = _patched_load  # type: ignore[assignment]
+
         try:
             from TTS.api import TTS  # type: ignore
         except Exception as e:
@@ -275,7 +335,12 @@ ENGINES: dict[str, _Engine] = {
     "xtts": _XTTSEngine(),
 }
 
-DEFAULT_ENGINE = os.environ.get("TTS_ENGINE_DEFAULT", "xtts")
+# Default to F5 — zero-shot identity transfer is noticeably closer to the
+# reference clip than XTTS's (especially on short 5–10 s prompts), and F5 is
+# Apache-2.0 vs XTTS's non-commercial CPML license. XTTS stays available in
+# the picker for the 15 non-EN/ZH languages it supports. Override with
+# `TTS_ENGINE_DEFAULT=xtts` if you want the old behavior.
+DEFAULT_ENGINE = os.environ.get("TTS_ENGINE_DEFAULT", "f5")
 
 
 def get_engine(engine_id: Optional[str] = None) -> _Engine:

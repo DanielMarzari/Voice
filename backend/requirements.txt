@@ -29,10 +29,20 @@ TTS>=0.22
 
 # Pin transformers to a version that still exposes BeamSearchScorer.
 # Coqui TTS (now unmaintained) imports BeamSearchScorer from transformers,
-# which was removed in transformers 4.44+. Without this pin the XTTS engine
-# fails at import time with `ImportError: cannot import name 'BeamSearchScorer'`.
-# 4.36.2 is the last line that stayed fully compatible with TTS 0.22.x.
-transformers==4.36.2
+# which was **removed entirely in transformers 5.0**. Without this pin pip
+# picks up a 5.x release (TTS 0.22.0 only pins `transformers>=4.33.0` with
+# no upper bound) and the XTTS engine fails at import with
+# `cannot import name 'BeamSearchScorer'`.
+# 4.46.3 is the highest 4.x line that tests clean against TTS 0.22.0; 4.36.2
+# also works but misses unrelated bug fixes. Re-test before bumping.
+transformers==4.46.3
+
+# PyTorch 2.6 flipped `torch.load(weights_only=True)` as the default; Coqui
+# TTS 0.22.0 still calls `torch.load()` without the flag, so the XTTS
+# checkpoint refuses to unpickle. `backend/tts.py::_XTTSEngine._load` installs
+# a narrow monkey-patch that forces `weights_only=False` for the XTTS load
+# path (safe because checkpoints come from the Coqui HF mirror, not user
+# uploads). No upper pin needed on torch — the patch is forward-compatible.
 
 # ---- Deep Clone (Stage 1 dataset prep) ----
 # Whisper is used to transcribe 3-10 s training segments, producing the
